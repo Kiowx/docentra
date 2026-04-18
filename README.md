@@ -1,7 +1,8 @@
 # 文枢 Docentra
 
-[English README](./README.en.md)
+[English](./README.en.md)
 
+文枢，一个智能多功能一体化工作台，可通过ai对话进行修改表格，同时提供可视化表格界面
 
 ## 简介
 
