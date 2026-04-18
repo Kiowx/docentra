@@ -2,7 +2,7 @@
 
 [English](./README.en.md)
 
-文枢，一个开源的智能多功能一体化工作台，可通过ai对话进行修改表格，同时提供可视化表格界面
+文枢，一个开源的智能多功能一体化工作台，可通过ai对话进行修改表格，同时提供可视化表格界面；将来可能会扩展添加word等编辑，敬请期待
 
 <img width="2100" height="1350" alt="35055659d47d26212137b54eb323dd39" src="https://github.com/user-attachments/assets/5aa19894-f3e5-4775-b11e-6d947cac1c99" />
 
