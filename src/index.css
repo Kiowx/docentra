@@ -1,0 +1,108 @@
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+@layer base {
+  html,
+  body,
+  #root {
+    height: 100%;
+    font-family: 'Segoe UI', 'PingFang SC', 'Microsoft YaHei', 'Noto Sans CJK SC', sans-serif;
+  }
+  * {
+    -webkit-font-smoothing: antialiased;
+  }
+  ::selection {
+    background-color: #2563eb33;
+  }
+}
+
+@layer components {
+  .cell-border {
+    border-right: 1px solid #e5e7eb;
+    border-bottom: 1px solid #e5e7eb;
+  }
+  .header-cell {
+    @apply bg-grid-header text-xs text-gray-600 font-medium select-none flex items-center justify-center;
+    border-right: 1px solid #d1d5db;
+    border-bottom: 1px solid #d1d5db;
+  }
+}
+
+/* Scrollbar styling */
+.grid-scroll {
+  scrollbar-color: #94a3b8 #e7edf5;
+  scrollbar-width: auto;
+}
+
+.grid-scroll::-webkit-scrollbar {
+  width: 14px;
+  height: 14px;
+}
+.grid-scroll::-webkit-scrollbar-track {
+  background: linear-gradient(180deg, #f8fafc 0%, #e7edf5 100%);
+  border-radius: 999px;
+  box-shadow: inset 0 0 0 1px #d8e1ec;
+}
+.grid-scroll::-webkit-scrollbar-thumb {
+  background: linear-gradient(180deg, #cbd5e1 0%, #94a3b8 100%);
+  border-radius: 999px;
+  border: 3px solid #e7edf5;
+  box-shadow: inset 0 1px 0 rgb(255 255 255 / 0.45);
+}
+.grid-scroll::-webkit-scrollbar-thumb:hover {
+  background: linear-gradient(180deg, #94a3b8 0%, #64748b 100%);
+}
+.grid-scroll::-webkit-scrollbar-thumb:active {
+  background: linear-gradient(180deg, #64748b 0%, #475569 100%);
+}
+.grid-scroll::-webkit-scrollbar-corner {
+  background: #e7edf5;
+}
+
+/* Chat scrollbar */
+.chat-scroll::-webkit-scrollbar {
+  width: 6px;
+}
+.chat-scroll::-webkit-scrollbar-track {
+  background: transparent;
+}
+.chat-scroll::-webkit-scrollbar-thumb {
+  background: #d1d5db;
+  border-radius: 3px;
+}
+
+/* Resize handles */
+.col-resize-handle {
+  position: absolute;
+  right: -2px;
+  top: 0;
+  width: 5px;
+  height: 100%;
+  cursor: col-resize;
+  z-index: 10;
+}
+.col-resize-handle:hover {
+  background: #2563eb;
+}
+.row-resize-handle {
+  position: absolute;
+  bottom: -2px;
+  left: 0;
+  width: 100%;
+  height: 5px;
+  cursor: row-resize;
+  z-index: 10;
+}
+.row-resize-handle:hover {
+  background: #2563eb;
+}
+
+/* Title bar drag region */
+.title-bar {
+  -webkit-app-region: drag;
+  user-select: none;
+}
+.title-bar button {
+  -webkit-app-region: no-drag;
+}

@@ -1,0 +1,48 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 256 256" fill="none">
+  <defs>
+    <linearGradient id="bg" x1="28" y1="24" x2="228" y2="232" gradientUnits="userSpaceOnUse">
+      <stop stop-color="#0F4C81" />
+      <stop offset="0.58" stop-color="#1D74C9" />
+      <stop offset="1" stop-color="#15B8C8" />
+    </linearGradient>
+    <linearGradient id="accent" x1="98" y1="98" x2="158" y2="158" gradientUnits="userSpaceOnUse">
+      <stop stop-color="#FFD76B" />
+      <stop offset="1" stop-color="#F59E0B" />
+    </linearGradient>
+    <filter id="shadow" x="28" y="30" width="200" height="198" filterUnits="userSpaceOnUse" color-interpolation-filters="sRGB">
+      <feOffset dy="8" />
+      <feGaussianBlur stdDeviation="8" />
+      <feColorMatrix values="0 0 0 0 0.0313726 0 0 0 0 0.145098 0 0 0 0 0.298039 0 0 0 0.18 0" />
+      <feBlend in2="SourceGraphic" result="shape" />
+    </filter>
+  </defs>
+
+  <rect x="16" y="16" width="224" height="224" rx="56" fill="url(#bg)" />
+  <circle cx="62" cy="58" r="48" fill="white" fill-opacity="0.08" />
+  <circle cx="206" cy="210" r="54" fill="white" fill-opacity="0.06" />
+
+  <g filter="url(#shadow)">
+    <rect x="42" y="42" width="56" height="56" rx="18" fill="#F8FBFF" />
+    <rect x="158" y="42" width="56" height="56" rx="18" fill="#F8FBFF" />
+    <rect x="42" y="158" width="56" height="56" rx="18" fill="#F8FBFF" />
+    <rect x="158" y="158" width="56" height="56" rx="18" fill="#F8FBFF" />
+
+    <rect x="56" y="58" width="24" height="6" rx="3" fill="#A8C4E9" />
+    <rect x="56" y="72" width="30" height="6" rx="3" fill="#D4E2F3" />
+
+    <rect x="172" y="58" width="24" height="6" rx="3" fill="#9FD9E2" />
+    <rect x="172" y="72" width="30" height="6" rx="3" fill="#D7EEF1" />
+
+    <rect x="56" y="174" width="24" height="6" rx="3" fill="#9FD9E2" />
+    <rect x="56" y="188" width="30" height="6" rx="3" fill="#D7EEF1" />
+
+    <rect x="172" y="174" width="24" height="6" rx="3" fill="#A8C4E9" />
+    <rect x="172" y="188" width="30" height="6" rx="3" fill="#D4E2F3" />
+
+    <rect x="96" y="96" width="64" height="64" rx="22" fill="url(#accent)" />
+    <rect x="112" y="112" width="12" height="12" rx="4" fill="white" />
+    <rect x="132" y="112" width="12" height="12" rx="4" fill="white" />
+    <rect x="112" y="132" width="12" height="12" rx="4" fill="white" />
+    <rect x="132" y="132" width="12" height="12" rx="4" fill="white" />
+  </g>
+</svg>
