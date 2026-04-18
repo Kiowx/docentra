@@ -1,6 +1,7 @@
 # 文枢 Docentra
 
-[English](./README.en.md)
+<a href="README.md"><strong>中文</strong></a> |
+<a href="README.en.md">English</a>
 
 文枢，一个开源的智能多功能一体化工作台，可通过ai对话进行修改表格，同时提供可视化表格界面；将来可能会扩展添加word等编辑，敬请期待
 
