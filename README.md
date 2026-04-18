@@ -4,6 +4,8 @@
 
 文枢，一个智能多功能一体化工作台，可通过ai对话进行修改表格，同时提供可视化表格界面
 
+<img width="2100" height="1350" alt="35055659d47d26212137b54eb323dd39" src="https://github.com/user-attachments/assets/5aa19894-f3e5-4775-b11e-6d947cac1c99" />
+
 ## 简介
 
 文枢（Docentra）基于 `React + Vite + Electron + Zustand` 构建，提供本地优先的桌面表格体验，并集成 AI 助手、Excel 导入导出、公式计算、筛选排序、查找替换等能力。项目当前以表格为核心，但命名和结构都已经按“文档工作台”方向设计。
