@@ -3,7 +3,7 @@
 <a href="README.md"><strong>中文</strong></a> |
 <a href="README.en.md">English</a>
 
-文枢，一个智能多功能一体化办公工作台，可通过ai对话进行修改表格，同时提供可视化表格界面；将来可能会扩展添加word等编辑，敬请期待
+文枢，一个智能多功能一体化办公工作台，可通过ai智能体进行修改表格，同时提供可视化表格界面；将来可能会扩展添加word等编辑，敬请期待
 友情链接：<a href="https://linux.do/">Linuxdo</a>
 
 <img width="2100" height="1350" alt="35055659d47d26212137b54eb323dd39" src="https://github.com/user-attachments/assets/5aa19894-f3e5-4775-b11e-6d947cac1c99" />
