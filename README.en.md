@@ -4,7 +4,7 @@
 <a href="README.en.md"><strong>English</strong></a>
 
 Wenshu: An AI-powered all-in-one workspace for conversational spreadsheet editing with a visual interface. Word editing & more coming soon. Stay tuned!
-<img width="2100" height="1350" alt="35055659d47d26212137b54eb323dd39" src="https://github.com/user-attachments/assets/5aa19894-f3e5-4775-b11e-6d947cac1c99" />
+<img width="2100" height="1350" alt="48ef73bd-ca06-42cf-bf62-cdf015b0bed7" src="https://github.com/user-attachments/assets/08f49c9a-9bdc-46db-804b-5a8c27dc79be" />
 
 ## Overview
 
