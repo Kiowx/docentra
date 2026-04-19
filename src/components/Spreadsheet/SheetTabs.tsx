@@ -53,11 +53,40 @@ const SheetTabs: React.FC = React.memo(() => {
     e.preventDefault()
     e.stopPropagation()
 
+    const sheet = sheets.find(s => s.id === sheetId)
+    if (!sheet) return
+
+    const actions: Array<{ label: string; action: () => void; danger?: boolean }> = [
+      { label: `重命名”${sheet.name}”`, action: () => { setEditingId(sheetId); setEditingName(sheet.name) } },
+    ]
+
     if (sheets.length > 1) {
-      if (confirm(`确定要删除“${sheets.find(s => s.id === sheetId)?.name}”吗？`)) {
-        deleteSheet(sheetId)
-      }
+      actions.push({ label: '删除工作表', action: () => { if (confirm(`确定要删除”${sheet.name}”吗？`)) deleteSheet(sheetId) }, danger: true })
     }
+
+    const menu = document.createElement('div')
+    menu.style.cssText = 'position:fixed;z-index:1000;background:white;border:1px solid #d1d5db;border-radius:6px;box-shadow:0 4px 6px -1px rgba(0,0,0,0.1);padding:4px 0;min-width:160px;'
+    menu.style.left = e.clientX + 'px'
+    menu.style.top = e.clientY + 'px'
+
+    const close = () => menu.remove()
+
+    actions.forEach(({ label, action, danger }) => {
+      const btn = document.createElement('button')
+      btn.textContent = label
+      btn.style.cssText = `display:block;width:100%;text-align:left;padding:6px 12px;font-size:13px;border:none;background:none;cursor:pointer;color:${danger ? '#dc2626' : '#374151'};`
+      btn.onmouseenter = () => { btn.style.background = danger ? '#fef2f2' : '#eff6ff' }
+      btn.onmouseleave = () => { btn.style.background = 'none' }
+      btn.onclick = () => { close(); action() }
+      menu.appendChild(btn)
+    })
+
+    document.body.appendChild(menu)
+
+    const handleClickOutside = (e2: MouseEvent) => {
+      if (!menu.contains(e2.target as Node)) { close(); document.removeEventListener('mousedown', handleClickOutside) }
+    }
+    setTimeout(() => document.addEventListener('mousedown', handleClickOutside), 0)
   }, [sheets, deleteSheet])
 
   return (

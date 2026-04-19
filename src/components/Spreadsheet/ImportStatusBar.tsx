@@ -35,7 +35,7 @@ const ImportStatusBar: React.FC = React.memo(() => {
           ))}
         </div>
         <button
-          className="shrink-0 rounded border border-current/20 px-2 py-1 text-[11px] font-medium hover:bg-white/60"
+          className="shrink-0 rounded border border-gray-300 px-2 py-1 text-[11px] font-medium hover:bg-white/60"
           onClick={clearImportReport}
           title="关闭导入校验结果"
         >

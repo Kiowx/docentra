@@ -1,6 +1,6 @@
 import React, { useState, useRef, useCallback, useEffect } from 'react'
 import { useSpreadsheetStore } from '@/store/useSpreadsheetStore'
-import { sendMessage } from '@/ai/aiService'
+import { sendMessage, stopCurrentMessage } from '@/ai/aiService'
 
 const ChatInput: React.FC = React.memo(() => {
   const chatLoading = useSpreadsheetStore((s) => s.chatLoading)
@@ -55,34 +55,47 @@ const ChatInput: React.FC = React.memo(() => {
             onKeyDown={handleKeyDown}
             onCompositionStart={() => { isComposingRef.current = true }}
             onCompositionEnd={() => { isComposingRef.current = false }}
-            placeholder={chatLoading ? 'AI 正在思考...' : '输入指令操作表格...'}
+            placeholder={chatLoading ? 'AI 正在回复，可点击右侧停止' : '输入指令操作表格...'}
             disabled={chatLoading}
             rows={1}
             className="chat-scroll block min-h-[24px] max-h-[120px] min-w-0 flex-1 resize-none overflow-y-auto bg-transparent px-0.5 py-0.5 text-[13px] leading-relaxed text-gray-800
               placeholder-gray-400 outline-none disabled:cursor-not-allowed"
             style={{ maxHeight: '120px', scrollbarGutter: 'stable' }}
           />
-          <button
-            onClick={handleSend}
-            disabled={!canSend}
-            className={`mb-0.5 h-7 w-7 shrink-0 flex items-center justify-center rounded-lg transition-all duration-150 ${
-              canSend
-                ? 'bg-blue-600 text-white hover:bg-blue-700 active:scale-90'
-                : 'bg-gray-200 text-gray-400'
-            }`}
-            title="发送"
-          >
-            <svg className="w-3.5 h-3.5" viewBox="0 0 20 20" fill="currentColor">
-              <path d="M3.105 2.289a.75.75 0 00-.826.95l1.414 4.925A1.5 1.5 0 005.135 9.25h6.115a.75.75 0 010 1.5H5.135a1.5 1.5 0 00-1.442 1.086l-1.414 4.926a.75.75 0 00.826.95l14.095-5.5a.75.75 0 000-1.38l-14.095-5.5z" />
-            </svg>
-          </button>
+          {chatLoading ? (
+            <button
+              onClick={stopCurrentMessage}
+              className="mb-0.5 h-7 w-7 shrink-0 flex items-center justify-center rounded-lg bg-red-100 text-red-600 hover:bg-red-200 active:scale-90 transition-all duration-150"
+              title="停止生成"
+            >
+              <svg className="w-3.5 h-3.5" viewBox="0 0 20 20" fill="currentColor">
+                <rect x="4.5" y="4.5" width="11" height="11" rx="2" />
+              </svg>
+            </button>
+          ) : (
+            <button
+              onClick={handleSend}
+              disabled={!canSend}
+              className={`mb-0.5 h-7 w-7 shrink-0 flex items-center justify-center rounded-lg transition-all duration-150 ${
+                canSend
+                  ? 'bg-blue-600 text-white hover:bg-blue-700 active:scale-90'
+                  : 'bg-gray-200 text-gray-400'
+              }`}
+              title="发送"
+            >
+              <svg className="w-3.5 h-3.5" viewBox="0 0 20 20" fill="currentColor">
+                <path d="M3.105 2.289a.75.75 0 00-.826.95l1.414 4.925A1.5 1.5 0 005.135 9.25h6.115a.75.75 0 010 1.5H5.135a1.5 1.5 0 00-1.442 1.086l-1.414 4.926a.75.75 0 00.826.95l14.095-5.5a.75.75 0 000-1.38l-14.095-5.5z" />
+              </svg>
+            </button>
+          )}
         </div>
       </div>
       <div className="flex items-center justify-between mt-1 px-0.5">
-        <span className="text-[10px] text-gray-400">Shift+Enter 换行</span>
+        <span className="text-[10px] text-gray-400">{chatLoading ? '正在回复中，可随时停止' : 'Shift+Enter 换行'}</span>
         <button
           onClick={() => clearChat()}
-          className="text-[10px] text-gray-400 hover:text-red-400 transition-colors"
+          disabled={chatLoading}
+          className="text-[10px] text-gray-400 hover:text-red-400 transition-colors disabled:opacity-40 disabled:cursor-not-allowed"
         >清空记录</button>
       </div>
     </div>

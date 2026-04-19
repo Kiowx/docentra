@@ -30,6 +30,31 @@ async function createMainWindow(): Promise<void> {
     await mainWindow.loadFile(path.join(__dirname, '../dist/index.html'))
   }
 
+  mainWindow.webContents.on('console-message', (_event, level, message, line, sourceId) => {
+    const levels = ['debug', 'info', 'warn', 'error']
+    const label = levels[level] ?? `level-${level}`
+    console.log(`[renderer:${label}] ${sourceId}:${line} ${message}`)
+  })
+
+  mainWindow.webContents.on('did-fail-load', (_event, errorCode, errorDescription, validatedURL) => {
+    console.error(`[renderer:did-fail-load] ${errorCode} ${errorDescription} ${validatedURL}`)
+  })
+
+  mainWindow.webContents.on('render-process-gone', (_event, details) => {
+    console.error(`[renderer:gone] reason=${details.reason} exitCode=${details.exitCode}`)
+  })
+
+  mainWindow.webContents.on('did-finish-load', async () => {
+    try {
+      const rootState = await mainWindow?.webContents.executeJavaScript(
+        '({ title: document.title, rootChildren: document.getElementById("root")?.childElementCount ?? -1, bodyText: document.body?.innerText?.slice(0, 200) ?? "" })',
+      )
+      console.log(`[renderer:did-finish-load] ${JSON.stringify(rootState)}`)
+    } catch (error) {
+      console.error(`[renderer:inspect-failed] ${error instanceof Error ? error.message : String(error)}`)
+    }
+  })
+
   mainWindow.on('closed', () => {
     mainWindow = null
   })

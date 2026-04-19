@@ -18,7 +18,7 @@ const FormulaBar: React.FC = React.memo(() => {
   const cancelEdit = useSpreadsheetStore((s) => s.cancelEdit)
   const setActiveCell = useSpreadsheetStore((s) => s.setActiveCell)
 
-  const formulaInputRef = useRef<HTMLInputElement>(null)
+  const formulaInputRef = useRef<HTMLTextAreaElement>(null)
   const nameBoxRef = useRef<HTMLInputElement>(null)
   const isComposingRef = useRef(false)
   const [nameValue, setNameValue] = React.useState('')
@@ -69,7 +69,7 @@ const FormulaBar: React.FC = React.memo(() => {
     }
   }, [editMode, rawValue, setEditMode, setEditValue])
 
-  const handleFormulaChange = useCallback((e: React.ChangeEvent<HTMLInputElement>) => {
+  const handleFormulaChange = useCallback((e: React.ChangeEvent<HTMLInputElement | HTMLTextAreaElement>) => {
     if (editMode !== 'formulaBar') {
       setEditMode('formulaBar')
     }
@@ -117,17 +117,23 @@ const FormulaBar: React.FC = React.memo(() => {
 
       {/* Formula input */}
       <div className="flex-1 h-full px-2">
-        <input
+        <textarea
           ref={formulaInputRef}
-          className="w-full h-full text-[12px] text-gray-800 border-none outline-none bg-transparent focus:bg-blue-50/50"
+          className="w-full h-full text-[12px] text-gray-800 border-none outline-none bg-transparent focus:bg-blue-50/50 resize-none leading-[25px]"
           value={formulaDisplayValue}
-          onChange={handleFormulaChange}
+          onChange={(e) => {
+            const el = e.target
+            el.style.height = 'auto'
+            el.style.height = Math.min(el.scrollHeight, 80) + 'px'
+            handleFormulaChange(e as unknown as React.ChangeEvent<HTMLInputElement>)
+          }}
           onFocus={handleFormulaFocus}
-          onKeyDown={handleFormulaKeyDown}
+          onKeyDown={handleFormulaKeyDown as unknown as React.KeyboardEventHandler<HTMLTextAreaElement>}
           onCompositionStart={() => { isComposingRef.current = true }}
           onCompositionEnd={() => { isComposingRef.current = false }}
           spellCheck={false}
           placeholder={editMode === 'none' ? displayValue : undefined}
+          rows={1}
         />
       </div>
     </div>

@@ -56,6 +56,7 @@ export function useDragMove(
       document.removeEventListener('mouseup', handleMouseUp)
       document.body.style.cursor = ''
       document.body.style.userSelect = ''
+      document.body.classList.remove('dragging')
 
       const target = resolveCell(upEvent.clientX, upEvent.clientY)
       if (!target || !selRange) return
@@ -82,6 +83,7 @@ export function useDragMove(
     }
 
     document.body.style.cursor = 'move'
+    document.body.classList.add('dragging')
     document.body.style.userSelect = 'none'
     document.addEventListener('mousemove', handleMouseMove)
     document.addEventListener('mouseup', handleMouseUp)

@@ -57,6 +57,14 @@ export interface ChatMessage {
   isStreaming?: boolean
 }
 
+export interface ChatSession {
+  id: string
+  title: string
+  messages: ChatMessage[]
+  createdAt: number
+  updatedAt: number
+}
+
 export interface ToolCallResult {
   toolName: string
   input: Record<string, unknown>

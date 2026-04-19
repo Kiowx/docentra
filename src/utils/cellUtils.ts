@@ -1,11 +1,13 @@
 import { v4 as uuidv4 } from 'uuid'
-import {
+import type {
   CellAddress, CellData, SelectionState, Sheet, ChatMessage,
   AIConfig, ContextMenuState, ClipboardData,
   ToolMode,
   DimensionSizes,
+} from '../types/index.ts'
+import {
   DEFAULT_COL_WIDTH, DEFAULT_ROW_HEIGHT, TOTAL_COLS, TOTAL_ROWS,
-} from '@/types'
+} from '../types/index.ts'
 
 // -- Cell address utilities --
 export function cellKey(row: number, col: number): string {
@@ -53,6 +55,23 @@ export function getSelectionRange(sel: SelectionState): { startRow: number; star
     startCol: Math.min(sel.rangeStart.col, sel.rangeEnd.col),
     endRow: Math.max(sel.rangeStart.row, sel.rangeEnd.row),
     endCol: Math.max(sel.rangeStart.col, sel.rangeEnd.col),
+  }
+}
+
+export function getActiveRange(sel: SelectionState): { startRow: number; startCol: number; endRow: number; endCol: number } {
+  if (sel.rangeStart && sel.rangeEnd) {
+    return {
+      startRow: Math.min(sel.rangeStart.row, sel.rangeEnd.row),
+      startCol: Math.min(sel.rangeStart.col, sel.rangeEnd.col),
+      endRow: Math.max(sel.rangeStart.row, sel.rangeEnd.row),
+      endCol: Math.max(sel.rangeStart.col, sel.rangeEnd.col),
+    }
+  }
+  return {
+    startRow: sel.activeCell.row,
+    startCol: sel.activeCell.col,
+    endRow: sel.activeCell.row,
+    endCol: sel.activeCell.col,
   }
 }
 

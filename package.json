@@ -1,6 +1,6 @@
 {
   "name": "docentra",
-  "version": "1.0.0",
+  "version": "1.0.2",
   "description": "Wenshu Docentra - AI-powered document workspace for spreadsheets and writing",
   "author": "Developer",
   "main": "dist-electron/main.js",
@@ -21,7 +21,9 @@
       "output": "release"
     },
     "win": {
-      "target": ["portable"],
+      "target": [
+        "portable"
+      ],
       "icon": "icon.ico"
     },
     "files": [

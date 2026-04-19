@@ -105,6 +105,7 @@ const FindReplaceDialog: React.FC<FindReplaceDialogProps> = React.memo(({
 
   const handleReplaceAll = useCallback(() => {
     if (results.length === 0) return
+    if (!confirm(`确定要替换全部 ${results.length} 个匹配项吗？`)) return
     const cells = activeSheet?.cells || {}
     const flags = matchCase ? 'g' : 'gi'
     const escaped = searchText.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')
@@ -136,6 +137,9 @@ const FindReplaceDialog: React.FC<FindReplaceDialogProps> = React.memo(({
 
   return (
     <div
+      role="dialog"
+      aria-modal="true"
+      aria-label="查找和替换"
       className="absolute top-2 right-2 z-[60] bg-white border border-gray-300 rounded-lg shadow-xl select-none"
       style={{ width: 380 }}
       onKeyDown={handleKeyDown}
@@ -194,14 +198,14 @@ const FindReplaceDialog: React.FC<FindReplaceDialogProps> = React.memo(({
 
         <div className="flex items-center gap-2 pt-1">
           <button
-            className="h-7 px-2 text-xs border border-gray-300 rounded hover:bg-gray-100 transition-colors"
+            className="h-7 px-2 text-xs border border-gray-300 rounded hover:bg-gray-100 transition-colors disabled:opacity-40 disabled:cursor-not-allowed"
             onClick={handleFindPrev}
             disabled={results.length === 0}
           >
             上一个
           </button>
           <button
-            className="h-7 px-2 text-xs border border-gray-300 rounded hover:bg-gray-100 transition-colors"
+            className="h-7 px-2 text-xs border border-gray-300 rounded hover:bg-gray-100 transition-colors disabled:opacity-40 disabled:cursor-not-allowed"
             onClick={handleFindNext}
             disabled={results.length === 0}
           >
@@ -210,14 +214,14 @@ const FindReplaceDialog: React.FC<FindReplaceDialogProps> = React.memo(({
           {mode === 'replace' && (
             <>
               <button
-                className="h-7 px-2 text-xs border border-gray-300 rounded hover:bg-gray-100 transition-colors"
+                className="h-7 px-2 text-xs border border-gray-300 rounded hover:bg-gray-100 transition-colors disabled:opacity-40 disabled:cursor-not-allowed"
                 onClick={handleReplace}
                 disabled={currentIdx < 0}
               >
                 替换
               </button>
               <button
-                className="h-7 px-2 text-xs border border-gray-300 rounded hover:bg-gray-100 transition-colors"
+                className="h-7 px-2 text-xs border border-gray-300 rounded hover:bg-gray-100 transition-colors disabled:opacity-40 disabled:cursor-not-allowed"
                 onClick={handleReplaceAll}
                 disabled={results.length === 0}
               >

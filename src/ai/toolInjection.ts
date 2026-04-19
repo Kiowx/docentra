@@ -222,14 +222,17 @@ export function buildInjectedToolPrompt(): string {
 
   return [
     'Tool injection fallback mode is enabled because native tool calling may be unavailable.',
-    'When you need a tool, output exactly one tool call and nothing else, using this format:',
+    'When you need tool calls, output only tool-call markup and nothing else.',
+    'Allowed output formats:',
     '<tool_call>{"name":"get_sheet_data","arguments":{"maxRows":50,"maxCols":26}}</tool_call>',
+    '<tool_calls>[{"name":"set_range","arguments":{"startRow":0,"startCol":0,"data":[["A"]]}},{"name":"format_cells","arguments":{"startRow":0,"startCol":0,"endRow":0,"endCol":0,"format":{"bold":true}}}]</tool_calls>',
     'Rules:',
-    '- Output exactly one tool call at a time.',
     '- Do not add markdown, code fences, or explanatory text around the tool call.',
+    '- Prefer batching all independent tool calls needed for a clear request into one response instead of waiting for another round trip.',
+    '- Use <tool_call>...</tool_call> for a single call, and <tool_calls>[...]</tool_calls> for multiple calls.',
     '- "name" must exactly match one tool from the catalog.',
     '- "arguments" must be a valid JSON object.',
-    '- After you receive a TOOL_RESULT message, either emit another <tool_call>...</tool_call> block or answer the user normally.',
+    '- After you receive a TOOL_RESULT message, either emit another tool-call block with all remaining independent calls or answer the user normally.',
     '- Never fabricate tool results.',
     `Tool catalog:\n${JSON.stringify(catalog, null, 2)}`,
   ].join('\n')
@@ -252,8 +255,9 @@ export function buildJsonToolPrompt(): string {
     '- Do not add markdown, code fences, XML tags, or explanatory text.',
     '- "name" must exactly match one tool from the catalog.',
     '- "arguments" must be a valid JSON object.',
-    '- Emit one tool call at a time unless the user explicitly needs multiple independent tool calls.',
-    '- After you receive a TOOL_RESULT message, either output another JSON tool call or answer the user normally.',
+    '- Prefer batching all independent tool calls needed for a clear request into one JSON response.',
+    '- For one tool call, output {"name":"...","arguments":{...}}. For multiple calls, output {"tool_calls":[...]}',
+    '- After you receive a TOOL_RESULT message, either output another JSON tool call payload containing the remaining independent calls or answer the user normally.',
     '- Never fabricate tool results.',
     `Tool catalog:\n${JSON.stringify(catalog, null, 2)}`,
   ].join('\n')
@@ -284,7 +288,7 @@ export function formatInjectedToolResults(
     'TOOL_RESULT',
     `<tool_results>${JSON.stringify(toolResults)}</tool_results>`,
     'Use these exact tool results.',
-    'If you need another tool, emit exactly one <tool_call>...</tool_call> block.',
+    'If you need more tools, emit the remaining independent calls in one <tool_call>...</tool_call> or <tool_calls>...</tool_calls> block.',
     'Otherwise, answer the user normally.',
   ].join('\n')
 }

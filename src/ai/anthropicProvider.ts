@@ -55,7 +55,10 @@ interface AnthropicResponse {
 interface ToolModeRunResult {
   content: string
   usedTools: boolean
+  executedToolNames: string[]
 }
+
+const READ_ONLY_TOOL_NAMES = new Set(['get_sheet_data'])
 
 export class AnthropicProvider implements AIProvider {
   private config: AnthropicProviderConfig
@@ -68,30 +71,32 @@ export class AnthropicProvider implements AIProvider {
     messages: { role: 'user' | 'assistant'; content: string }[],
     onToken: (token: string) => void,
     onToolCall: (name: string, input: Record<string, any>) => Promise<string>,
+    signal?: AbortSignal,
   ): Promise<string> {
     if (this.config.toolMode === 'auto') {
-      return this.sendAutoMessage(messages, onToken, onToolCall)
+      return this.sendAutoMessage(messages, onToken, onToolCall, signal)
     }
 
     if (this.config.toolMode === 'json') {
-      return this.sendJsonMessage(messages, onToken, onToolCall)
+      return this.sendJsonMessage(messages, onToken, onToolCall, signal)
     }
 
     if (this.config.toolMode === 'inject') {
-      return this.sendInjectedMessage(messages, onToken, onToolCall)
+      return this.sendInjectedMessage(messages, onToken, onToolCall, signal)
     }
 
     if (this.config.toolMode === 'none') {
-      return this.sendPlainMessage(messages, onToken)
+      return this.sendPlainMessage(messages, onToken, signal)
     }
 
-    return this.sendNativeMessage(messages, onToken, onToolCall)
+    return this.sendNativeMessage(messages, onToken, onToolCall, signal)
   }
 
   private async sendAutoMessage(
     messages: { role: 'user' | 'assistant'; content: string }[],
     onToken: (token: string) => void,
     onToolCall: (name: string, input: Record<string, any>) => Promise<string>,
+    signal?: AbortSignal,
   ): Promise<string> {
     const nativeTokens: string[] = []
     try {
@@ -99,6 +104,7 @@ export class AnthropicProvider implements AIProvider {
         messages,
         (token) => { nativeTokens.push(token) },
         onToolCall,
+        signal,
       )
 
       if (this.shouldAcceptToolModeResult(nativeResult)) {
@@ -107,6 +113,12 @@ export class AnthropicProvider implements AIProvider {
           onToken(nativeContent)
         }
         return nativeResult.content
+      }
+
+      if (!this.canRetryRejectedResult(nativeResult)) {
+        const fallbackMessage = this.buildPostToolFallbackMessage()
+        onToken(fallbackMessage)
+        return fallbackMessage
       }
     } catch (error) {
       const message = error instanceof Error ? error.message : String(error)
@@ -121,6 +133,7 @@ export class AnthropicProvider implements AIProvider {
         messages,
         (token) => { jsonTokens.push(token) },
         onToolCall,
+        signal,
       )
 
       if (this.shouldAcceptToolModeResult(jsonResult)) {
@@ -129,6 +142,12 @@ export class AnthropicProvider implements AIProvider {
           onToken(jsonContent)
         }
         return jsonResult.content
+      }
+
+      if (!this.canRetryRejectedResult(jsonResult)) {
+        const fallbackMessage = this.buildPostToolFallbackMessage()
+        onToken(fallbackMessage)
+        return fallbackMessage
       }
     } catch (error) {
       const message = error instanceof Error ? error.message : String(error)
@@ -142,19 +161,34 @@ export class AnthropicProvider implements AIProvider {
       messages,
       (token) => { injectedTokens.push(token) },
       onToolCall,
+      signal,
     )
-    const injectedContent = injectedTokens.join('')
-    if (injectedContent) {
-      onToken(injectedContent)
+
+    if (this.shouldAcceptToolModeResult(injectedResult)) {
+      const injectedContent = injectedTokens.join('')
+      if (injectedContent) {
+        onToken(injectedContent)
+      }
+      return injectedResult.content
     }
-    return injectedResult.content
+
+    if (!this.canRetryRejectedResult(injectedResult)) {
+      const fallbackMessage = this.buildPostToolFallbackMessage()
+      onToken(fallbackMessage)
+      return fallbackMessage
+    }
+
+    const fallbackMessage = '当前 API 返回了可疑的工具失败结果。请点击“测试支持情况”，或切换到“自动回退”工具模式。'
+    onToken(fallbackMessage)
+    return fallbackMessage
   }
 
   private async sendPlainMessage(
     messages: { role: 'user' | 'assistant'; content: string }[],
     onToken: (token: string) => void,
+    signal?: AbortSignal,
   ): Promise<string> {
-    const response = await this.makeRequest(this.toConversation(messages), false, this.config.systemPrompt)
+    const response = await this.makeRequest(this.toConversation(messages), false, this.config.systemPrompt, signal)
     if ('error' in response) {
       throw new Error(response.error)
     }
@@ -170,23 +204,47 @@ export class AnthropicProvider implements AIProvider {
     messages: { role: 'user' | 'assistant'; content: string }[],
     onToken: (token: string) => void,
     onToolCall: (name: string, input: Record<string, any>) => Promise<string>,
+    signal?: AbortSignal,
   ): Promise<string> {
-    const result = await this.runNativeMessage(messages, onToken, onToolCall)
-    return result.content
+    const nativeTokens: string[] = []
+    const result = await this.runNativeMessage(
+      messages,
+      (token) => { nativeTokens.push(token) },
+      onToolCall,
+      signal,
+    )
+
+    if (this.shouldAcceptToolModeResult(result)) {
+      const content = nativeTokens.join('')
+      if (content) {
+        onToken(content)
+      }
+      return result.content
+    }
+
+    if (!this.canRetryRejectedResult(result)) {
+      const fallbackMessage = this.buildPostToolFallbackMessage()
+      onToken(fallbackMessage)
+      return fallbackMessage
+    }
+
+    return this.runRescueFallbackModes(messages, onToken, onToolCall, 'json', signal)
   }
 
   private async runNativeMessage(
     messages: { role: 'user' | 'assistant'; content: string }[],
     onToken: (token: string) => void,
     onToolCall: (name: string, input: Record<string, any>) => Promise<string>,
+    signal?: AbortSignal,
   ): Promise<ToolModeRunResult> {
     const conversation = this.toConversation(messages)
     let fullText = ''
     let usedTools = false
+    const executedToolNames: string[] = []
     const maxIterations = 20
 
     for (let iteration = 0; iteration < maxIterations; iteration++) {
-      const response = await this.makeRequest(conversation, true, this.config.systemPrompt)
+      const response = await this.makeRequest(conversation, true, this.config.systemPrompt, signal)
       if ('error' in response) {
         throw new Error(response.error)
       }
@@ -202,7 +260,7 @@ export class AnthropicProvider implements AIProvider {
       )
 
       if (response.stop_reason !== 'tool_use' || toolUses.length === 0) {
-        return { content: fullText, usedTools }
+        return { content: fullText, usedTools, executedToolNames }
       }
 
       usedTools = true
@@ -213,6 +271,7 @@ export class AnthropicProvider implements AIProvider {
 
       const toolResults = await Promise.all(
         toolUses.map(async (toolUse) => {
+          executedToolNames.push(toolUse.name)
           try {
             const result = await onToolCall(toolUse.name, toolUse.input)
             return {
@@ -241,6 +300,7 @@ export class AnthropicProvider implements AIProvider {
     return {
       content: 'Reached maximum number of tool call iterations.',
       usedTools,
+      executedToolNames,
     }
   }
 
@@ -248,15 +308,38 @@ export class AnthropicProvider implements AIProvider {
     messages: { role: 'user' | 'assistant'; content: string }[],
     onToken: (token: string) => void,
     onToolCall: (name: string, input: Record<string, any>) => Promise<string>,
+    signal?: AbortSignal,
   ): Promise<string> {
-    const result = await this.runJsonMessage(messages, onToken, onToolCall)
-    return result.content
+    const jsonTokens: string[] = []
+    const result = await this.runJsonMessage(
+      messages,
+      (token) => { jsonTokens.push(token) },
+      onToolCall,
+      signal,
+    )
+
+    if (this.shouldAcceptToolModeResult(result)) {
+      const content = jsonTokens.join('')
+      if (content) {
+        onToken(content)
+      }
+      return result.content
+    }
+
+    if (!this.canRetryRejectedResult(result)) {
+      const fallbackMessage = this.buildPostToolFallbackMessage()
+      onToken(fallbackMessage)
+      return fallbackMessage
+    }
+
+    return this.runRescueFallbackModes(messages, onToken, onToolCall, 'inject', signal)
   }
 
   private async runJsonMessage(
     messages: { role: 'user' | 'assistant'; content: string }[],
     onToken: (token: string) => void,
     onToolCall: (name: string, input: Record<string, any>) => Promise<string>,
+    signal?: AbortSignal,
   ): Promise<ToolModeRunResult> {
     const jsonSystemPrompt = this.config.systemPrompt
       ? `${this.config.systemPrompt}\n\n${buildJsonToolPrompt()}`
@@ -269,8 +352,10 @@ export class AnthropicProvider implements AIProvider {
       jsonSystemPrompt,
       [
         'The previous JSON tool call could not be parsed.',
-        'Return only valid JSON like {"name":"get_sheet_data","arguments":{"maxRows":1,"maxCols":1}} with no markdown or extra text.',
+        'Return only valid JSON like {"name":"get_sheet_data","arguments":{"maxRows":1,"maxCols":1}} or {"tool_calls":[{"name":"set_range","arguments":{"startRow":0,"startCol":0,"data":[["A"]]}}]} with no markdown or extra text.',
       ].join('\n'),
+      20,
+      signal,
     )
   }
 
@@ -278,15 +363,76 @@ export class AnthropicProvider implements AIProvider {
     messages: { role: 'user' | 'assistant'; content: string }[],
     onToken: (token: string) => void,
     onToolCall: (name: string, input: Record<string, any>) => Promise<string>,
+    signal?: AbortSignal,
   ): Promise<string> {
-    const result = await this.runInjectedMessage(messages, onToken, onToolCall)
-    return result.content
+    const injectedTokens: string[] = []
+    const result = await this.runInjectedMessage(
+      messages,
+      (token) => { injectedTokens.push(token) },
+      onToolCall,
+      signal,
+    )
+
+    if (this.shouldAcceptToolModeResult(result)) {
+      const content = injectedTokens.join('')
+      if (content) {
+        onToken(content)
+      }
+      return result.content
+    }
+
+    if (!this.canRetryRejectedResult(result)) {
+      const fallbackMessage = this.buildPostToolFallbackMessage()
+      onToken(fallbackMessage)
+      return fallbackMessage
+    }
+
+    return this.runRescueFallbackModes(messages, onToken, onToolCall, 'json', signal)
+  }
+
+  private async runRescueFallbackModes(
+    messages: { role: 'user' | 'assistant'; content: string }[],
+    onToken: (token: string) => void,
+    onToolCall: (name: string, input: Record<string, any>) => Promise<string>,
+    preferredMode: 'json' | 'inject',
+    signal?: AbortSignal,
+  ): Promise<string> {
+    const attempts: Array<'json' | 'inject'> = preferredMode === 'json'
+      ? ['json', 'inject']
+      : ['inject', 'json']
+
+    for (const mode of attempts) {
+      try {
+        const tokenBuffer: string[] = []
+        const result = mode === 'json'
+          ? await this.runJsonMessage(messages, (token) => { tokenBuffer.push(token) }, onToolCall, signal)
+          : await this.runInjectedMessage(messages, (token) => { tokenBuffer.push(token) }, onToolCall, signal)
+
+        if (this.shouldAcceptToolModeResult(result)) {
+          const content = tokenBuffer.join('')
+          if (content) {
+            onToken(content)
+          }
+          return result.content
+        }
+      } catch (error) {
+        const message = error instanceof Error ? error.message : String(error)
+        if (!this.shouldFallbackFromPromptMode(message)) {
+          throw error
+        }
+      }
+    }
+
+    const fallbackMessage = '当前 API 返回了可疑的工具失败结果。请点击“测试支持情况”，或切换到“自动回退”工具模式。'
+    onToken(fallbackMessage)
+    return fallbackMessage
   }
 
   private async runInjectedMessage(
     messages: { role: 'user' | 'assistant'; content: string }[],
     onToken: (token: string) => void,
     onToolCall: (name: string, input: Record<string, any>) => Promise<string>,
+    signal?: AbortSignal,
   ): Promise<ToolModeRunResult> {
     const injectedSystemPrompt = this.config.systemPrompt
       ? `${this.config.systemPrompt}\n\n${buildInjectedToolPrompt()}`
@@ -299,8 +445,10 @@ export class AnthropicProvider implements AIProvider {
       injectedSystemPrompt,
       [
         'The previous tool call could not be parsed.',
-        'Reissue exactly one valid <tool_call>{"name":"...","arguments":{}}</tool_call> block with valid JSON and no extra text.',
+        'Reissue a valid <tool_call>{"name":"...","arguments":{}}</tool_call> or <tool_calls>[{"name":"...","arguments":{}}]</tool_calls> block with valid JSON and no extra text.',
       ].join('\n'),
+      20,
+      signal,
     )
   }
 
@@ -311,19 +459,21 @@ export class AnthropicProvider implements AIProvider {
     modeSystemPrompt: string,
     invalidToolRepairPrompt: string,
     maxIterations = 20,
+    signal?: AbortSignal,
   ): Promise<ToolModeRunResult> {
     const conversation = this.toConversation(messages)
     let usedTools = false
+    const executedToolNames: string[] = []
 
     for (let iteration = 0; iteration < maxIterations; iteration++) {
-      const response = await this.makeRequest(conversation, false, modeSystemPrompt)
+      const response = await this.makeRequest(conversation, false, modeSystemPrompt, signal)
       if ('error' in response) {
         throw new Error(response.error)
       }
 
       const rawContent = this.extractResponseText(response.content)
       if (!rawContent) {
-        return { content: '', usedTools }
+        return { content: '', usedTools, executedToolNames }
       }
 
       const parsed = parsePromptToolCalls(rawContent)
@@ -336,6 +486,7 @@ export class AnthropicProvider implements AIProvider {
 
         const toolResults: Array<{ name: string; result: string }> = []
         for (const toolCall of parsed.toolCalls) {
+          executedToolNames.push(toolCall.name)
           const result = await onToolCall(toolCall.name, toolCall.arguments)
           toolResults.push({ name: toolCall.name, result })
         }
@@ -360,12 +511,13 @@ export class AnthropicProvider implements AIProvider {
       }
 
       onToken(rawContent)
-      return { content: rawContent, usedTools }
+      return { content: rawContent, usedTools, executedToolNames }
     }
 
     return {
       content: 'Reached maximum number of prompt-driven tool call iterations.',
       usedTools,
+      executedToolNames,
     }
   }
 
@@ -411,11 +563,20 @@ export class AnthropicProvider implements AIProvider {
   }
 
   private shouldAcceptToolModeResult(result: ToolModeRunResult): boolean {
-    if (result.usedTools) {
+    const trimmed = result.content.trim()
+    if (!trimmed) {
       return true
     }
 
     return !this.isSuspiciousToolFailureContent(result.content)
+  }
+
+  private canRetryRejectedResult(result: ToolModeRunResult): boolean {
+    return result.executedToolNames.every((toolName) => READ_ONLY_TOOL_NAMES.has(toolName))
+  }
+
+  private buildPostToolFallbackMessage(): string {
+    return '当前 API 在工具执行后返回了可疑的工具失败结果。我已停止自动重试以避免重复修改；请先检查表格是否已部分更新，并建议点击“测试支持情况”或切换到“自动回退”工具模式。'
   }
 
   private isSuspiciousToolFailureContent(content: string): boolean {
@@ -449,14 +610,14 @@ export class AnthropicProvider implements AIProvider {
       '无法读取当前表格',
     ]
 
-    const mentionsKnownTool = spreadsheetTools.some((tool) => normalized.includes(tool.name.toLowerCase()))
-    return suspiciousPatterns.some((pattern) => normalized.includes(pattern)) || mentionsKnownTool
+    return suspiciousPatterns.some((pattern) => normalized.includes(pattern))
   }
 
   private async makeRequest(
     messages: AnthropicMessage[],
     includeTools: boolean,
     systemPrompt?: string,
+    signal?: AbortSignal,
   ): Promise<AnthropicResponse | { error: string }> {
     const bodyPayload: Record<string, any> = {
       model: this.config.model,
@@ -486,6 +647,7 @@ export class AnthropicProvider implements AIProvider {
           'x-api-key': this.config.apiKey,
         },
         body: JSON.stringify(bodyPayload),
+        signal,
       })
     } catch (error) {
       return {

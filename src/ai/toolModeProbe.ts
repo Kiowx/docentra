@@ -17,6 +17,16 @@ interface ProbeResponse {
   error?: string
 }
 
+const PROBE_TOOL_NAME = 'format_cells'
+const PROBE_TOOL_ARGS = {
+  startRow: 0,
+  startCol: 0,
+  endRow: 0,
+  endCol: 0,
+  format: { bgColor: '#FF0000' },
+}
+const PROBE_TOOL_JSON = JSON.stringify(PROBE_TOOL_ARGS)
+
 function getHeaders(config: Pick<AIConfig, 'provider' | 'apiKey'>): Record<string, string> {
   if (config.provider === 'claude') {
     return {
@@ -173,19 +183,19 @@ async function postAnthropicMessage(config: Pick<AIConfig, 'provider' | 'apiKey'
   }
 }
 
-function isNativeToolCallResponse(json: any): boolean {
+function isNativeToolCallResponse(json: any, expectedToolName: string): boolean {
   const toolCalls = json?.choices?.[0]?.message?.tool_calls
   return Array.isArray(toolCalls)
-    && toolCalls.some((toolCall) => toolCall?.function?.name === 'get_sheet_data')
+    && toolCalls.some((toolCall) => toolCall?.function?.name === expectedToolName)
 }
 
-function isAnthropicNativeToolCallResponse(json: any): boolean {
+function isAnthropicNativeToolCallResponse(json: any, expectedToolName: string): boolean {
   const content = json?.content
   return Array.isArray(content)
-    && content.some((block) => block?.type === 'tool_use' && block?.name === 'get_sheet_data')
+    && content.some((block) => block?.type === 'tool_use' && block?.name === expectedToolName)
 }
 
-function describeMissingNativeToolCall(json: any): string {
+function describeMissingNativeToolCall(json: any, expectedToolName: string): string {
   const message = json?.choices?.[0]?.message
   if (!message) {
     return '接口返回成功，但没有标准 message 结构。'
@@ -193,13 +203,13 @@ function describeMissingNativeToolCall(json: any): string {
 
   const content = extractResponseContent(message.content)
   if (content) {
-    return `接口返回成功，但没有 tool_calls，模型回复为：${content}`
+    return `接口返回成功，但没有返回 ${expectedToolName} 的 tool_calls，模型回复为：${content}`
   }
 
-  return '接口返回成功，但没有返回 tool_calls。'
+  return `接口返回成功，但没有返回 ${expectedToolName} 的 tool_calls。`
 }
 
-function describeMissingAnthropicToolCall(json: any): string {
+function describeMissingAnthropicToolCall(json: any, expectedToolName: string): string {
   const content = json?.content
   if (!Array.isArray(content)) {
     return '接口返回成功，但没有标准 content 结构。'
@@ -207,10 +217,10 @@ function describeMissingAnthropicToolCall(json: any): string {
 
   const text = extractAnthropicContentText(content)
   if (text) {
-    return `接口返回成功，但没有 tool_use，模型回复为：${text}`
+    return `接口返回成功，但没有返回 ${expectedToolName} 的 tool_use，模型回复为：${text}`
   }
 
-  return '接口返回成功，但没有返回 tool_use。'
+  return `接口返回成功，但没有返回 ${expectedToolName} 的 tool_use。`
 }
 
 function summarizeProbeFailure(response: ProbeResponse): string {
@@ -231,12 +241,12 @@ function shouldRetryWithoutToolChoice(response: ProbeResponse): boolean {
 }
 
 async function probeNativeToolMode(config: Pick<AIConfig, 'provider' | 'apiKey' | 'model' | 'baseUrl'>): Promise<{ supported: boolean; details: string }> {
-  if (config.provider === 'claude') {
-    const toolDefinition = spreadsheetTools.find((tool) => tool.name === 'get_sheet_data')
-    if (!toolDefinition) {
-      return { supported: false, details: '缺少 get_sheet_data 工具定义。' }
-    }
+  const toolDefinition = spreadsheetTools.find((tool) => tool.name === PROBE_TOOL_NAME)
+  if (!toolDefinition) {
+    return { supported: false, details: `缺少 ${PROBE_TOOL_NAME} 工具定义。` }
+  }
 
+  if (config.provider === 'claude') {
     const response = await postAnthropicMessage(config, {
       model: config.model,
       max_tokens: 128,
@@ -247,7 +257,7 @@ async function probeNativeToolMode(config: Pick<AIConfig, 'provider' | 'apiKey' 
           content: [
             {
               type: 'text',
-              text: 'Call get_sheet_data with {"maxRows":1,"maxCols":1} right now.',
+              text: `Call ${PROBE_TOOL_NAME} with ${PROBE_TOOL_JSON} right now.`,
             },
           ],
         },
@@ -261,14 +271,14 @@ async function probeNativeToolMode(config: Pick<AIConfig, 'provider' | 'apiKey' 
       ],
     })
 
-    if (response.ok && isAnthropicNativeToolCallResponse(response.json)) {
-      return { supported: true, details: '接口接受 tools 参数并返回了原生 tool_use。' }
+    if (response.ok && isAnthropicNativeToolCallResponse(response.json, PROBE_TOOL_NAME)) {
+      return { supported: true, details: `接口接受 tools 参数并返回了原生 ${PROBE_TOOL_NAME} tool_use。` }
     }
 
     if (response.ok) {
       return {
         supported: false,
-        details: `原生工具调用未通过探测：${describeMissingAnthropicToolCall(response.json)}`,
+        details: `原生工具调用未通过探测：${describeMissingAnthropicToolCall(response.json, PROBE_TOOL_NAME)}`,
       }
     }
 
@@ -276,11 +286,6 @@ async function probeNativeToolMode(config: Pick<AIConfig, 'provider' | 'apiKey' 
       supported: false,
       details: `原生工具调用未通过探测：${summarizeProbeFailure(response)}`,
     }
-  }
-
-  const toolDefinition = spreadsheetTools.find((tool) => tool.name === 'get_sheet_data')
-  if (!toolDefinition) {
-    return { supported: false, details: '缺少 get_sheet_data 工具定义。' }
   }
 
   const baseBody = {
@@ -292,7 +297,7 @@ async function probeNativeToolMode(config: Pick<AIConfig, 'provider' | 'apiKey' 
       },
       {
         role: 'user',
-        content: 'Call get_sheet_data with {"maxRows":1,"maxCols":1} right now.',
+        content: `Call ${PROBE_TOOL_NAME} with ${PROBE_TOOL_JSON} right now.`,
       },
     ],
     tools: [
@@ -314,13 +319,13 @@ async function probeNativeToolMode(config: Pick<AIConfig, 'provider' | 'apiKey' 
     tool_choice: {
       type: 'function',
       function: {
-        name: 'get_sheet_data',
+        name: PROBE_TOOL_NAME,
       },
     },
   })
 
-  if (forcedResponse.ok && isNativeToolCallResponse(forcedResponse.json)) {
-    return { supported: true, details: '接口接受 tools 参数并返回了原生 tool_calls。' }
+  if (forcedResponse.ok && isNativeToolCallResponse(forcedResponse.json, PROBE_TOOL_NAME)) {
+    return { supported: true, details: `接口接受 tools 参数并返回了原生 ${PROBE_TOOL_NAME} tool_calls。` }
   }
 
   if (!forcedResponse.ok && !shouldRetryWithoutToolChoice(forcedResponse)) {
@@ -328,14 +333,14 @@ async function probeNativeToolMode(config: Pick<AIConfig, 'provider' | 'apiKey' 
   }
 
   const relaxedResponse = await postChatCompletion(config, baseBody)
-  if (relaxedResponse.ok && isNativeToolCallResponse(relaxedResponse.json)) {
-    return { supported: true, details: '接口在不强制 tool_choice 的情况下返回了原生 tool_calls。' }
+  if (relaxedResponse.ok && isNativeToolCallResponse(relaxedResponse.json, PROBE_TOOL_NAME)) {
+    return { supported: true, details: `接口在不强制 tool_choice 的情况下返回了原生 ${PROBE_TOOL_NAME} tool_calls。` }
   }
 
   if (relaxedResponse.ok) {
     return {
       supported: false,
-      details: `原生工具调用未通过探测：${describeMissingNativeToolCall(relaxedResponse.json)}`,
+      details: `原生工具调用未通过探测：${describeMissingNativeToolCall(relaxedResponse.json, PROBE_TOOL_NAME)}`,
     }
   }
 
@@ -357,7 +362,7 @@ async function probeInjectedToolMode(config: Pick<AIConfig, 'provider' | 'apiKey
           content: [
             {
               type: 'text',
-              text: 'Return exactly one tool call for get_sheet_data with {"maxRows":1,"maxCols":1}. Do not explain.',
+              text: `Return exactly one tool call for ${PROBE_TOOL_NAME} with ${PROBE_TOOL_JSON}. Do not explain.`,
             },
           ],
         },
@@ -372,7 +377,7 @@ async function probeInjectedToolMode(config: Pick<AIConfig, 'provider' | 'apiKey
         },
         {
           role: 'user',
-          content: 'Return exactly one tool call for get_sheet_data with {"maxRows":1,"maxCols":1}. Do not explain.',
+          content: `Return exactly one tool call for ${PROBE_TOOL_NAME} with ${PROBE_TOOL_JSON}. Do not explain.`,
         },
       ],
       stream: false,
@@ -390,8 +395,8 @@ async function probeInjectedToolMode(config: Pick<AIConfig, 'provider' | 'apiKey
     ? extractAnthropicContentText(response.json?.content)
     : extractResponseContent(response.json?.choices?.[0]?.message?.content)
   const parsed = parsePromptToolCalls(content)
-  if (parsed.toolCalls.some((toolCall) => toolCall.name === 'get_sheet_data')) {
-    return { supported: true, details: '模型能按注入协议稳定返回可解析的工具调用。' }
+  if (parsed.toolCalls.some((toolCall) => toolCall.name === PROBE_TOOL_NAME)) {
+    return { supported: true, details: `模型能按注入协议稳定返回可解析的 ${PROBE_TOOL_NAME} 工具调用。` }
   }
 
   return {
@@ -414,7 +419,7 @@ async function probeJsonToolMode(config: Pick<AIConfig, 'provider' | 'apiKey' | 
           content: [
             {
               type: 'text',
-              text: 'Return only JSON for a get_sheet_data tool call with {"maxRows":1,"maxCols":1}.',
+              text: `Return only JSON for a ${PROBE_TOOL_NAME} tool call with ${PROBE_TOOL_JSON}.`,
             },
           ],
         },
@@ -429,7 +434,7 @@ async function probeJsonToolMode(config: Pick<AIConfig, 'provider' | 'apiKey' | 
         },
         {
           role: 'user',
-          content: 'Return only JSON for a get_sheet_data tool call with {"maxRows":1,"maxCols":1}.',
+          content: `Return only JSON for a ${PROBE_TOOL_NAME} tool call with ${PROBE_TOOL_JSON}.`,
         },
       ],
       stream: false,
@@ -447,8 +452,8 @@ async function probeJsonToolMode(config: Pick<AIConfig, 'provider' | 'apiKey' | 
     ? extractAnthropicContentText(response.json?.content)
     : extractResponseContent(response.json?.choices?.[0]?.message?.content)
   const parsed = parsePromptToolCalls(content)
-  if (parsed.toolCalls.some((toolCall) => toolCall.name === 'get_sheet_data')) {
-    return { supported: true, details: '模型能按纯 JSON 协议稳定返回可解析的工具调用。' }
+  if (parsed.toolCalls.some((toolCall) => toolCall.name === PROBE_TOOL_NAME)) {
+    return { supported: true, details: `模型能按纯 JSON 协议稳定返回可解析的 ${PROBE_TOOL_NAME} 工具调用。` }
   }
 
   return {

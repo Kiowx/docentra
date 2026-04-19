@@ -15,6 +15,10 @@
   ::selection {
     background-color: #2563eb33;
   }
+  :focus-visible {
+    outline: 2px solid #3b82f6;
+    outline-offset: 2px;
+  }
 }
 
 @layer components {
@@ -60,7 +64,11 @@
   background: #e7edf5;
 }
 
-/* Chat scrollbar */
+/* Chat scrollbar - with Firefox support */
+.chat-scroll {
+  scrollbar-color: #d1d5db transparent;
+  scrollbar-width: thin;
+}
 .chat-scroll::-webkit-scrollbar {
   width: 6px;
 }
@@ -96,6 +104,14 @@
 }
 .row-resize-handle:hover {
   background: #2563eb;
+}
+
+/* Drag overlay */
+body.dragging {
+  cursor: move !important;
+}
+body.dragging * {
+  cursor: move !important;
 }
 
 /* Title bar drag region */

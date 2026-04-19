@@ -19,7 +19,10 @@ interface OpenAIProviderConfig {
 interface ToolModeRunResult {
   content: string
   usedTools: boolean
+  executedToolNames: string[]
 }
+
+const READ_ONLY_TOOL_NAMES = new Set(['get_sheet_data'])
 
 export class OpenAICompatibleProvider implements AIProvider {
   private config: OpenAIProviderConfig
@@ -42,30 +45,32 @@ export class OpenAICompatibleProvider implements AIProvider {
     messages: { role: 'user' | 'assistant'; content: string }[],
     onToken: (token: string) => void,
     onToolCall: (name: string, input: Record<string, any>) => Promise<string>,
+    signal?: AbortSignal,
   ): Promise<string> {
     if (this.config.toolMode === 'auto') {
-      return this.sendAutoMessage(messages, onToken, onToolCall)
+      return this.sendAutoMessage(messages, onToken, onToolCall, signal)
     }
 
     if (this.config.toolMode === 'json') {
-      return this.sendJsonMessage(messages, onToken, onToolCall)
+      return this.sendJsonMessage(messages, onToken, onToolCall, signal)
     }
 
     if (this.config.toolMode === 'inject') {
-      return this.sendInjectedMessage(messages, onToken, onToolCall)
+      return this.sendInjectedMessage(messages, onToken, onToolCall, signal)
     }
 
     if (this.config.toolMode === 'none') {
-      return this.sendPlainMessage(messages, onToken)
+      return this.sendPlainMessage(messages, onToken, signal)
     }
 
-    return this.sendNativeMessage(messages, onToken, onToolCall)
+    return this.sendNativeMessage(messages, onToken, onToolCall, signal)
   }
 
   private async sendAutoMessage(
     messages: { role: 'user' | 'assistant'; content: string }[],
     onToken: (token: string) => void,
     onToolCall: (name: string, input: Record<string, any>) => Promise<string>,
+    signal?: AbortSignal,
   ): Promise<string> {
     const nativeTokens: string[] = []
     try {
@@ -73,14 +78,18 @@ export class OpenAICompatibleProvider implements AIProvider {
         messages,
         (token) => { nativeTokens.push(token) },
         onToolCall,
+        signal,
       )
 
       if (this.shouldAcceptToolModeResult(nativeResult)) {
-        const nativeContent = nativeTokens.join('')
-        if (nativeContent) {
-          onToken(nativeContent)
-        }
+        this.emitAcceptedResult(nativeResult, nativeTokens, onToken)
         return nativeResult.content
+      }
+
+      if (!this.canRetryRejectedResult(nativeResult)) {
+        const fallbackMessage = this.buildPostToolFallbackMessage()
+        onToken(fallbackMessage)
+        return fallbackMessage
       }
     } catch (error) {
       const message = error instanceof Error ? error.message : String(error)
@@ -95,14 +104,18 @@ export class OpenAICompatibleProvider implements AIProvider {
         messages,
         (token) => { jsonTokens.push(token) },
         onToolCall,
+        signal,
       )
 
       if (this.shouldAcceptToolModeResult(jsonResult)) {
-        const jsonContent = jsonTokens.join('')
-        if (jsonContent) {
-          onToken(jsonContent)
-        }
+        this.emitAcceptedResult(jsonResult, jsonTokens, onToken)
         return jsonResult.content
+      }
+
+      if (!this.canRetryRejectedResult(jsonResult)) {
+        const fallbackMessage = this.buildPostToolFallbackMessage()
+        onToken(fallbackMessage)
+        return fallbackMessage
       }
     } catch (error) {
       const message = error instanceof Error ? error.message : String(error)
@@ -116,17 +129,29 @@ export class OpenAICompatibleProvider implements AIProvider {
       messages,
       (token) => { injectedTokens.push(token) },
       onToolCall,
+      signal,
     )
-    const injectedContent = injectedTokens.join('')
-    if (injectedContent) {
-      onToken(injectedContent)
+
+    if (this.shouldAcceptToolModeResult(injectedResult)) {
+      this.emitAcceptedResult(injectedResult, injectedTokens, onToken)
+      return injectedResult.content
     }
-    return injectedResult.content
+
+    if (!this.canRetryRejectedResult(injectedResult)) {
+      const fallbackMessage = this.buildPostToolFallbackMessage()
+      onToken(fallbackMessage)
+      return fallbackMessage
+    }
+
+    const fallbackMessage = '当前 API 返回了可疑的工具失败结果。请点击“测试支持情况”，或切换到“自动回退”工具模式。'
+    onToken(fallbackMessage)
+    return fallbackMessage
   }
 
   private async sendPlainMessage(
     messages: { role: 'user' | 'assistant'; content: string }[],
     onToken: (token: string) => void,
+    signal?: AbortSignal,
   ): Promise<string> {
     const allMessages: any[] = []
 
@@ -136,7 +161,7 @@ export class OpenAICompatibleProvider implements AIProvider {
 
     allMessages.push(...messages.map((message) => ({ role: message.role, content: message.content })))
 
-    const response = await this.makeRequest(allMessages, onToken, false)
+    const response = await this.makeRequest(allMessages, onToken, false, signal)
     if (response.type === 'error') {
       throw new Error(response.error)
     }
@@ -148,18 +173,39 @@ export class OpenAICompatibleProvider implements AIProvider {
     messages: { role: 'user' | 'assistant'; content: string }[],
     onToken: (token: string) => void,
     onToolCall: (name: string, input: Record<string, any>) => Promise<string>,
+    signal?: AbortSignal,
   ): Promise<string> {
-    const result = await this.runNativeMessage(messages, onToken, onToolCall)
-    return result.content
+    const nativeTokens: string[] = []
+    const result = await this.runNativeMessage(
+      messages,
+      (token) => { nativeTokens.push(token) },
+      onToolCall,
+      signal,
+    )
+
+    if (this.shouldAcceptToolModeResult(result)) {
+      this.emitAcceptedResult(result, nativeTokens, onToken)
+      return result.content
+    }
+
+    if (!this.canRetryRejectedResult(result)) {
+      const fallbackMessage = this.buildPostToolFallbackMessage()
+      onToken(fallbackMessage)
+      return fallbackMessage
+    }
+
+    return this.runRescueFallbackModes(messages, onToken, onToolCall, 'json', signal)
   }
 
   private async runNativeMessage(
     messages: { role: 'user' | 'assistant'; content: string }[],
     onToken: (token: string) => void,
     onToolCall: (name: string, input: Record<string, any>) => Promise<string>,
+    signal?: AbortSignal,
   ): Promise<ToolModeRunResult> {
     const maxIterations = 20 // Safety limit for the agentic loop
     let usedTools = false
+    const executedToolNames: string[] = []
 
     const allMessages: any[] = []
 
@@ -171,7 +217,7 @@ export class OpenAICompatibleProvider implements AIProvider {
     allMessages.push(...messages.map(m => ({ role: m.role, content: m.content })))
 
     for (let iteration = 0; iteration < maxIterations; iteration++) {
-      const response = await this.makeRequest(allMessages, onToken)
+      const response = await this.makeRequest(allMessages, onToken, true, signal)
 
       if (response.type === 'error') {
         throw new Error(response.error)
@@ -179,7 +225,7 @@ export class OpenAICompatibleProvider implements AIProvider {
 
       if (response.type === 'content') {
         // No tool calls - just return the accumulated content
-        return { content: response.content, usedTools }
+        return { content: response.content, usedTools, executedToolNames }
       }
 
       usedTools = true
@@ -200,6 +246,7 @@ export class OpenAICompatibleProvider implements AIProvider {
 
       // Execute each tool call and add results to conversation
       for (const tc of response.toolCalls!) {
+        executedToolNames.push(tc.name)
         let parsedInput: Record<string, any>
         try {
           parsedInput = JSON.parse(tc.arguments)
@@ -222,6 +269,7 @@ export class OpenAICompatibleProvider implements AIProvider {
     return {
       content: 'Reached maximum number of tool call iterations.',
       usedTools,
+      executedToolNames,
     }
   }
 
@@ -229,15 +277,35 @@ export class OpenAICompatibleProvider implements AIProvider {
     messages: { role: 'user' | 'assistant'; content: string }[],
     onToken: (token: string) => void,
     onToolCall: (name: string, input: Record<string, any>) => Promise<string>,
+    signal?: AbortSignal,
   ): Promise<string> {
-    const result = await this.runJsonMessage(messages, onToken, onToolCall)
-    return result.content
+    const jsonTokens: string[] = []
+    const result = await this.runJsonMessage(
+      messages,
+      (token) => { jsonTokens.push(token) },
+      onToolCall,
+      signal,
+    )
+
+    if (this.shouldAcceptToolModeResult(result)) {
+      this.emitAcceptedResult(result, jsonTokens, onToken)
+      return result.content
+    }
+
+    if (!this.canRetryRejectedResult(result)) {
+      const fallbackMessage = this.buildPostToolFallbackMessage()
+      onToken(fallbackMessage)
+      return fallbackMessage
+    }
+
+    return this.runRescueFallbackModes(messages, onToken, onToolCall, 'inject', signal)
   }
 
   private async runJsonMessage(
     messages: { role: 'user' | 'assistant'; content: string }[],
     onToken: (token: string) => void,
     onToolCall: (name: string, input: Record<string, any>) => Promise<string>,
+    signal?: AbortSignal,
   ): Promise<ToolModeRunResult> {
     const jsonSystemPrompt = this.config.systemPrompt
       ? `${this.config.systemPrompt}\n\n${buildJsonToolPrompt()}`
@@ -250,8 +318,10 @@ export class OpenAICompatibleProvider implements AIProvider {
       jsonSystemPrompt,
       [
         'The previous JSON tool call could not be parsed.',
-        'Return only valid JSON like {"name":"get_sheet_data","arguments":{"maxRows":1,"maxCols":1}} with no markdown or extra text.',
+        'Return only valid JSON like {"name":"get_sheet_data","arguments":{"maxRows":1,"maxCols":1}} or {"tool_calls":[{"name":"set_range","arguments":{"startRow":0,"startCol":0,"data":[["A"]]}}]} with no markdown or extra text.',
       ].join('\n'),
+      20,
+      signal,
     )
   }
 
@@ -259,15 +329,70 @@ export class OpenAICompatibleProvider implements AIProvider {
     messages: { role: 'user' | 'assistant'; content: string }[],
     onToken: (token: string) => void,
     onToolCall: (name: string, input: Record<string, any>) => Promise<string>,
+    signal?: AbortSignal,
   ): Promise<string> {
-    const result = await this.runInjectedMessage(messages, onToken, onToolCall)
-    return result.content
+    const injectedTokens: string[] = []
+    const result = await this.runInjectedMessage(
+      messages,
+      (token) => { injectedTokens.push(token) },
+      onToolCall,
+      signal,
+    )
+
+    if (this.shouldAcceptToolModeResult(result)) {
+      this.emitAcceptedResult(result, injectedTokens, onToken)
+      return result.content
+    }
+
+    if (!this.canRetryRejectedResult(result)) {
+      const fallbackMessage = this.buildPostToolFallbackMessage()
+      onToken(fallbackMessage)
+      return fallbackMessage
+    }
+
+    return this.runRescueFallbackModes(messages, onToken, onToolCall, 'json', signal)
+  }
+
+  private async runRescueFallbackModes(
+    messages: { role: 'user' | 'assistant'; content: string }[],
+    onToken: (token: string) => void,
+    onToolCall: (name: string, input: Record<string, any>) => Promise<string>,
+    preferredMode: 'json' | 'inject',
+    signal?: AbortSignal,
+  ): Promise<string> {
+    const attempts: Array<'json' | 'inject'> = preferredMode === 'json'
+      ? ['json', 'inject']
+      : ['inject', 'json']
+
+    for (const mode of attempts) {
+      try {
+        const tokenBuffer: string[] = []
+        const result = mode === 'json'
+          ? await this.runJsonMessage(messages, (token) => { tokenBuffer.push(token) }, onToolCall, signal)
+          : await this.runInjectedMessage(messages, (token) => { tokenBuffer.push(token) }, onToolCall, signal)
+
+        if (this.shouldAcceptToolModeResult(result)) {
+          this.emitAcceptedResult(result, tokenBuffer, onToken)
+          return result.content
+        }
+      } catch (error) {
+        const message = error instanceof Error ? error.message : String(error)
+        if (!this.shouldFallbackFromPromptMode(message)) {
+          throw error
+        }
+      }
+    }
+
+    const fallbackMessage = '当前 API 返回了可疑的工具失败结果。请点击“测试支持情况”，或切换到“自动回退”工具模式。'
+    onToken(fallbackMessage)
+    return fallbackMessage
   }
 
   private async runInjectedMessage(
     messages: { role: 'user' | 'assistant'; content: string }[],
     onToken: (token: string) => void,
     onToolCall: (name: string, input: Record<string, any>) => Promise<string>,
+    signal?: AbortSignal,
   ): Promise<ToolModeRunResult> {
     const maxIterations = 20
     const injectedSystemPrompt = this.config.systemPrompt
@@ -281,9 +406,10 @@ export class OpenAICompatibleProvider implements AIProvider {
       injectedSystemPrompt,
       [
         'The previous tool call could not be parsed.',
-        'Reissue exactly one valid <tool_call>{"name":"...","arguments":{}}</tool_call> block with valid JSON and no extra text.',
+        'Reissue a valid <tool_call>{"name":"...","arguments":{}}</tool_call> or <tool_calls>[{"name":"...","arguments":{}}]</tool_calls> block with valid JSON and no extra text.',
       ].join('\n'),
       maxIterations,
+      signal,
     )
   }
 
@@ -294,14 +420,16 @@ export class OpenAICompatibleProvider implements AIProvider {
     modeSystemPrompt: string,
     invalidToolRepairPrompt: string,
     maxIterations = 20,
+    signal?: AbortSignal,
   ): Promise<ToolModeRunResult> {
     const allMessages: any[] = []
     let usedTools = false
+    const executedToolNames: string[] = []
     allMessages.push({ role: 'system', content: modeSystemPrompt })
     allMessages.push(...messages.map((message) => ({ role: message.role, content: message.content })))
 
     for (let iteration = 0; iteration < maxIterations; iteration++) {
-      const response = await this.makePromptToolRequest(allMessages)
+      const response = await this.makePromptToolRequest(allMessages, signal)
 
       if (response.type === 'error') {
         throw new Error(response.error)
@@ -311,7 +439,7 @@ export class OpenAICompatibleProvider implements AIProvider {
         if (response.content) {
           onToken(response.content)
         }
-        return { content: response.content, usedTools }
+        return { content: response.content, usedTools, executedToolNames }
       }
 
       if (response.type === 'invalid_tool_call') {
@@ -328,6 +456,7 @@ export class OpenAICompatibleProvider implements AIProvider {
 
       const toolResults: Array<{ name: string; result: string }> = []
       for (const toolCall of response.toolCalls) {
+        executedToolNames.push(toolCall.name)
         const result = await onToolCall(toolCall.name, toolCall.arguments)
         toolResults.push({ name: toolCall.name, result })
       }
@@ -341,6 +470,7 @@ export class OpenAICompatibleProvider implements AIProvider {
     return {
       content: 'Reached maximum number of prompt-driven tool call iterations.',
       usedTools,
+      executedToolNames,
     }
   }
 
@@ -348,6 +478,7 @@ export class OpenAICompatibleProvider implements AIProvider {
     messages: any[],
     onToken: (token: string) => void,
     includeTools = true,
+    signal?: AbortSignal,
   ): Promise<
     | { type: 'content'; content: string }
     | { type: 'tool_calls'; content: string; toolCalls: { id: string; name: string; arguments: string }[] }
@@ -382,6 +513,7 @@ export class OpenAICompatibleProvider implements AIProvider {
         method: 'POST',
         headers: this.getHeaders(),
         body,
+        signal,
       })
     } catch (err) {
       return {
@@ -413,6 +545,7 @@ export class OpenAICompatibleProvider implements AIProvider {
 
   private async makePromptToolRequest(
     messages: any[],
+    signal?: AbortSignal,
   ): Promise<
     | { type: 'content'; content: string }
     | { type: 'tool_calls'; rawContent: string; toolCalls: { name: string; arguments: Record<string, any> }[] }
@@ -431,6 +564,7 @@ export class OpenAICompatibleProvider implements AIProvider {
           messages,
           stream: false,
         }),
+        signal,
       })
     } catch (err) {
       return {
@@ -539,11 +673,31 @@ export class OpenAICompatibleProvider implements AIProvider {
   }
 
   private shouldAcceptToolModeResult(result: ToolModeRunResult): boolean {
-    if (result.usedTools) {
+    const trimmed = result.content.trim()
+    if (!trimmed) {
       return true
     }
 
     return !this.isSuspiciousToolFailureContent(result.content)
+  }
+
+  private canRetryRejectedResult(result: ToolModeRunResult): boolean {
+    return result.executedToolNames.every((toolName) => READ_ONLY_TOOL_NAMES.has(toolName))
+  }
+
+  private emitAcceptedResult(
+    result: ToolModeRunResult,
+    bufferedTokens: string[],
+    onToken: (token: string) => void,
+  ): void {
+    const content = bufferedTokens.join('') || result.content
+    if (content) {
+      onToken(content)
+    }
+  }
+
+  private buildPostToolFallbackMessage(): string {
+    return '当前 API 在工具执行后返回了可疑的工具失败结果。我已停止自动重试以避免重复修改；请先检查表格是否已部分更新，并建议点击“测试支持情况”或切换到“自动回退”工具模式。'
   }
 
   private isSuspiciousToolFailureContent(content: string): boolean {
@@ -577,8 +731,7 @@ export class OpenAICompatibleProvider implements AIProvider {
       '无法读取当前表格',
     ]
 
-    const mentionsKnownTool = spreadsheetTools.some((tool) => normalized.includes(tool.name.toLowerCase()))
-    return suspiciousPatterns.some((pattern) => normalized.includes(pattern)) || mentionsKnownTool
+    return suspiciousPatterns.some((pattern) => normalized.includes(pattern))
   }
 
   private async processJsonResponse(
@@ -655,10 +808,61 @@ export class OpenAICompatibleProvider implements AIProvider {
     let contentBuffer = ''
     let toolCallsMap = new Map<number, { id: string; name: string; arguments: string }>()
     let currentToolCallIndex = 0
+    let buffer = ''
+
+    const processSseLine = (line: string) => {
+      const trimmed = line.trim()
+      if (!trimmed || trimmed === 'data: [DONE]' || !trimmed.startsWith('data: ')) {
+        return
+      }
+
+      const jsonStr = trimmed.slice(6)
+      if (!jsonStr) return
+
+      let chunk: any
+      try {
+        chunk = JSON.parse(jsonStr)
+      } catch {
+        return
+      }
+
+      const delta = chunk.choices?.[0]?.delta
+      if (!delta) return
+
+      if (delta.content) {
+        contentBuffer += delta.content
+        onToken(delta.content)
+      }
+
+      if (delta.tool_calls) {
+        for (const tcDelta of delta.tool_calls) {
+          const idx = tcDelta.index ?? currentToolCallIndex
+
+          if (!toolCallsMap.has(idx)) {
+            toolCallsMap.set(idx, {
+              id: tcDelta.id || '',
+              name: '',
+              arguments: '',
+            })
+            currentToolCallIndex = idx + 1
+          }
+
+          const existing = toolCallsMap.get(idx)!
+
+          if (tcDelta.id) {
+            existing.id = tcDelta.id
+          }
+          if (tcDelta.function?.name) {
+            existing.name = tcDelta.function.name
+          }
+          if (tcDelta.function?.arguments) {
+            existing.arguments += tcDelta.function.arguments
+          }
+        }
+      }
+    }
 
     try {
-      let buffer = ''
-
       while (true) {
         const { done, value } = await reader.read()
         if (done) break
@@ -670,64 +874,12 @@ export class OpenAICompatibleProvider implements AIProvider {
         buffer = lines.pop() || '' // Keep incomplete line in buffer
 
         for (const line of lines) {
-          const trimmed = line.trim()
-          if (!trimmed || trimmed === '') continue
-          if (trimmed === 'data: [DONE]') continue
-          if (!trimmed.startsWith('data: ')) continue
-
-          const jsonStr = trimmed.slice(6) // Remove 'data: '
-          if (!jsonStr) continue
-
-          let chunk: any
-          try {
-            chunk = JSON.parse(jsonStr)
-          } catch {
-            continue
-          }
-
-          const delta = chunk.choices?.[0]?.delta
-          if (!delta) continue
-
-          // Handle content tokens
-          if (delta.content) {
-            contentBuffer += delta.content
-            onToken(delta.content)
-          }
-
-          // Handle tool call deltas
-          if (delta.tool_calls) {
-            for (const tcDelta of delta.tool_calls) {
-              const idx = tcDelta.index ?? currentToolCallIndex
-
-              if (!toolCallsMap.has(idx)) {
-                toolCallsMap.set(idx, {
-                  id: tcDelta.id || '',
-                  name: '',
-                  arguments: '',
-                })
-                currentToolCallIndex = idx + 1
-              }
-
-              const existing = toolCallsMap.get(idx)!
-
-              if (tcDelta.id) {
-                existing.id = tcDelta.id
-              }
-              if (tcDelta.function?.name) {
-                existing.name = tcDelta.function.name
-              }
-              if (tcDelta.function?.arguments) {
-                existing.arguments += tcDelta.function.arguments
-              }
-            }
-          }
-
-          // Handle finish_reason
-          const finishReason = chunk.choices?.[0]?.finish_reason
-          if (finishReason === 'tool_calls' || (finishReason === 'stop' && toolCallsMap.size > 0)) {
-            // Tool calls are complete
-          }
+          processSseLine(line)
         }
+      }
+
+      if (buffer.trim()) {
+        processSseLine(buffer)
       }
     } catch (err) {
       return {

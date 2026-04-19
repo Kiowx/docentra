@@ -1,7 +1,7 @@
 import { create } from 'zustand'
 import type {
   CellData, CellFormat, CellAddress, SelectionState, EditMode,
-  Sheet, ChatMessage, AIConfig, ContextMenuState, ClipboardData, ImportValidationReport, DimensionSizes,
+  Sheet, ChatMessage, ChatSession, AIConfig, ContextMenuState, ClipboardData, ImportValidationReport, DimensionSizes,
 } from '@/types'
 import { DEFAULT_COL_WIDTH, DEFAULT_ROW_HEIGHT, TOTAL_COLS, TOTAL_ROWS } from '@/types'
 import { cellKey, parseCellKey, createSheet, normalizeAIConfig } from '@/utils/cellUtils'
@@ -22,6 +22,8 @@ interface SpreadsheetState {
   importReport: ImportValidationReport | null
 
   // Chat
+  chatSessions: ChatSession[]
+  activeChatSessionId: string
   chatMessages: ChatMessage[]
   chatLoading: boolean
   streamingMessageId: string | null
@@ -100,12 +102,15 @@ interface SpreadsheetActions {
   sortRange: (range: { startRow: number; startCol: number; endRow: number; endCol: number }, column: number, direction: 'asc' | 'desc') => void
 
   // Chat
-  addChatMessage: (msg: ChatMessage) => void
-  appendMessageContent: (id: string, chunk: string) => void
-  updateMessage: (id: string, updater: (message: ChatMessage) => ChatMessage) => void
-  deleteChatMessage: (id: string) => void
+  createChatSession: (title?: string) => string
+  setActiveChatSession: (id: string) => void
+  deleteChatSession: (id: string) => void
+  addChatMessage: (msg: ChatMessage, sessionId?: string) => void
+  appendMessageContent: (id: string, chunk: string, sessionId?: string) => void
+  updateMessage: (id: string, updater: (message: ChatMessage) => ChatMessage, sessionId?: string) => void
+  deleteChatMessage: (id: string, sessionId?: string) => void
   setChatLoading: (loading: boolean) => void
-  clearChat: () => void
+  clearChat: (sessionId?: string) => void
 
   // AI Config
   setAIConfig: (config: Partial<AIConfig>) => void
@@ -124,8 +129,12 @@ const initialSheet = createSheet('工作表1')
 const STORAGE_NAME = 'ai-spreadsheet-storage'
 const STORAGE_VERSION = 1
 const HISTORY_LIMIT = 50
+const DEFAULT_CHAT_SESSION_TITLE = '新对话'
 
-type PersistedStoreState = Pick<SpreadsheetState, 'sheets' | 'activeSheetId' | 'aiConfig' | 'chatPanelWidth'>
+type PersistedStoreState = Pick<
+  SpreadsheetState,
+  'sheets' | 'activeSheetId' | 'aiConfig' | 'chatPanelWidth' | 'chatSessions' | 'activeChatSessionId'
+>
 
 interface PersistedEnvelope {
   state: PersistedStoreState
@@ -174,12 +183,121 @@ function getStorage(): Storage | null {
   }
 }
 
-function buildPersistedState(state: Pick<SpreadsheetState, 'sheets' | 'activeSheetId' | 'aiConfig' | 'chatPanelWidth'>): PersistedStoreState {
+function createChatSessionId(): string {
+  if (typeof crypto !== 'undefined' && typeof crypto.randomUUID === 'function') {
+    return crypto.randomUUID()
+  }
+  return `chat-${Date.now()}-${Math.random().toString(36).slice(2, 10)}`
+}
+
+function getChatSessionFallbackTitle(message?: ChatMessage): string {
+  if (!message || message.role !== 'user') {
+    return DEFAULT_CHAT_SESSION_TITLE
+  }
+  const normalized = message.content.replace(/\s+/g, ' ').trim()
+  if (!normalized) {
+    return DEFAULT_CHAT_SESSION_TITLE
+  }
+  return normalized.length > 24 ? `${normalized.slice(0, 24)}…` : normalized
+}
+
+function createEmptyChatSession(title = DEFAULT_CHAT_SESSION_TITLE): ChatSession {
+  const timestamp = Date.now()
+  return {
+    id: createChatSessionId(),
+    title,
+    messages: [],
+    createdAt: timestamp,
+    updatedAt: timestamp,
+  }
+}
+
+function normalizeChatMessage(message: ChatMessage): ChatMessage {
+  return {
+    ...message,
+    toolCalls: message.toolCalls ?? [],
+    isStreaming: false,
+  }
+}
+
+function normalizeChatSession(session: Partial<ChatSession>): ChatSession {
+  const normalizedMessages = Array.isArray(session.messages)
+    ? session.messages.map(normalizeChatMessage)
+    : []
+  const fallbackTitle = getChatSessionFallbackTitle(normalizedMessages[0])
+  return {
+    id: typeof session.id === 'string' && session.id ? session.id : createChatSessionId(),
+    title: typeof session.title === 'string' && session.title.trim() ? session.title.trim() : fallbackTitle,
+    messages: normalizedMessages,
+    createdAt: typeof session.createdAt === 'number' ? session.createdAt : Date.now(),
+    updatedAt: typeof session.updatedAt === 'number' ? session.updatedAt : Date.now(),
+  }
+}
+
+function ensureChatSessions(
+  sessions: Partial<ChatSession>[] | undefined,
+  activeChatSessionId?: string,
+): { chatSessions: ChatSession[]; activeChatSessionId: string } {
+  const normalizedSessions = Array.isArray(sessions)
+    ? sessions.map(normalizeChatSession)
+    : []
+
+  if (normalizedSessions.length === 0) {
+    const initialSession = createEmptyChatSession()
+    return {
+      chatSessions: [initialSession],
+      activeChatSessionId: initialSession.id,
+    }
+  }
+
+  const resolvedActiveSessionId = normalizedSessions.some((session) => session.id === activeChatSessionId)
+    ? activeChatSessionId!
+    : normalizedSessions[0].id
+
+  return {
+    chatSessions: normalizedSessions,
+    activeChatSessionId: resolvedActiveSessionId,
+  }
+}
+
+function getSessionMessages(
+  chatSessions: ChatSession[],
+  activeChatSessionId: string,
+): ChatMessage[] {
+  return chatSessions.find((session) => session.id === activeChatSessionId)?.messages ?? []
+}
+
+function syncChatSessionMessages(
+  chatSessions: ChatSession[],
+  sessionId: string,
+  messages: ChatMessage[],
+): ChatSession[] {
+  const lastMessage = messages[messages.length - 1]
+  const updatedAt = Date.now()
+  const updatedSessions = chatSessions.map((session) => {
+    if (session.id !== sessionId) return session
+    const nextTitle = session.title === DEFAULT_CHAT_SESSION_TITLE && messages.length > 0
+      ? getChatSessionFallbackTitle(messages.find((message) => message.role === 'user') ?? lastMessage)
+      : session.title
+    return {
+      ...session,
+      title: nextTitle,
+      messages,
+      updatedAt,
+    }
+  })
+
+  return [...updatedSessions].sort((a, b) => b.updatedAt - a.updatedAt)
+}
+
+function buildPersistedState(state: Pick<SpreadsheetState, 'sheets' | 'activeSheetId' | 'aiConfig' | 'chatPanelWidth' | 'chatSessions' | 'activeChatSessionId'>): PersistedStoreState {
   return {
     sheets: state.sheets,
     activeSheetId: state.activeSheetId,
     aiConfig: normalizeAIConfig(state.aiConfig),
     chatPanelWidth: state.chatPanelWidth,
+    chatSessions: state.chatSessions,
+    activeChatSessionId: state.activeChatSessionId,
   }
 }
 
@@ -223,12 +341,18 @@ function hydratePersistedState(): HydratedPersistedState {
     const activeSheetId = normalizedSheets?.some((sheet) => sheet.id === persistedState.activeSheetId)
       ? persistedState.activeSheetId
       : normalizedSheets?.[0]?.id
+    const normalizedChats = ensureChatSessions(
+      persistedState.chatSessions as Partial<ChatSession>[] | undefined,
+      persistedState.activeChatSessionId,
+    )
 
     const normalizedState: Partial<PersistedStoreState> = {
       sheets: normalizedSheets,
       activeSheetId,
       aiConfig: normalizeAIConfig(persistedState.aiConfig),
       chatPanelWidth: persistedState.chatPanelWidth,
+      chatSessions: normalizedChats.chatSessions,
+      activeChatSessionId: normalizedChats.activeChatSessionId,
     }
 
     const serializedNormalizedState = serializePersistedState({
@@ -236,6 +360,8 @@ function hydratePersistedState(): HydratedPersistedState {
       activeSheetId: activeSheetId ?? normalizedSheets?.[0]?.id ?? initialSheet.id,
       aiConfig: normalizeAIConfig(persistedState.aiConfig),
       chatPanelWidth: persistedState.chatPanelWidth ?? 350,
+      chatSessions: normalizedChats.chatSessions,
+      activeChatSessionId: normalizedChats.activeChatSessionId,
     })
 
     return {
@@ -389,6 +515,8 @@ function updateSheetCells(
 
 export const useSpreadsheetStore = create<Store>()(
   (set, get) => {
+    const initialChatSessions = hydratedPersistedState.state.chatSessions ?? [createEmptyChatSession()]
+    const initialActiveChatSessionId = hydratedPersistedState.state.activeChatSessionId ?? initialChatSessions[0].id
     const setDocumentState = (
       partial:
         | Store
@@ -460,7 +588,9 @@ export const useSpreadsheetStore = create<Store>()(
       contextMenu: { visible: false, x: 0, y: 0 },
       clipboard: null,
       importReport: null,
-      chatMessages: [],
+      chatSessions: initialChatSessions,
+      activeChatSessionId: initialActiveChatSessionId,
+      chatMessages: getSessionMessages(initialChatSessions, initialActiveChatSessionId),
       chatLoading: false,
       streamingMessageId: null,
       streamingContent: '',
@@ -1049,34 +1179,135 @@ export const useSpreadsheetStore = create<Store>()(
       },
 
       // Chat
-      addChatMessage: (msg) => set(s => ({ chatMessages: [...s.chatMessages, msg] })),
-      appendMessageContent: (id, chunk) => set(s => {
+      createChatSession: (title) => {
+        const session = createEmptyChatSession(title?.trim() || DEFAULT_CHAT_SESSION_TITLE)
+        setPersistedState((s) => ({
+          chatSessions: [session, ...s.chatSessions],
+          activeChatSessionId: session.id,
+          chatMessages: [],
+          streamingMessageId: null,
+          streamingContent: '',
+        }))
+        return session.id
+      },
+      setActiveChatSession: (id) => setPersistedState((s) => {
+        if (s.activeChatSessionId === id) return {}
+        const targetSession = s.chatSessions.find((session) => session.id === id)
+        if (!targetSession) return {}
+        return {
+          activeChatSessionId: id,
+          chatMessages: targetSession.messages,
+          streamingMessageId: null,
+          streamingContent: '',
+        }
+      }),
+      deleteChatSession: (id) => setPersistedState((s) => {
+        if (s.chatSessions.length <= 1) {
+          const resetSession = {
+            ...s.chatSessions[0],
+            title: DEFAULT_CHAT_SESSION_TITLE,
+            messages: [],
+            updatedAt: Date.now(),
+          }
+          return {
+            chatSessions: [resetSession],
+            activeChatSessionId: resetSession.id,
+            chatMessages: [],
+            streamingMessageId: null,
+            streamingContent: '',
+          }
+        }
+
+        const remainingSessions = s.chatSessions.filter((session) => session.id !== id)
+        const nextActiveSessionId = id === s.activeChatSessionId
+          ? remainingSessions[0].id
+          : s.activeChatSessionId
+        return {
+          chatSessions: remainingSessions,
+          activeChatSessionId: nextActiveSessionId,
+          chatMessages: getSessionMessages(remainingSessions, nextActiveSessionId),
+          streamingMessageId: id === s.activeChatSessionId ? null : s.streamingMessageId,
+          streamingContent: id === s.activeChatSessionId ? '' : s.streamingContent,
+        }
+      }),
+      addChatMessage: (msg, sessionId) => setPersistedState((s) => {
+        const targetSessionId = sessionId ?? s.activeChatSessionId
+        const currentMessages = getSessionMessages(s.chatSessions, targetSessionId)
+        const nextMessages = [...currentMessages, msg]
+        const chatSessions = syncChatSessionMessages(s.chatSessions, targetSessionId, nextMessages)
+        return {
+          chatSessions,
+          chatMessages: targetSessionId === s.activeChatSessionId ? nextMessages : s.chatMessages,
+        }
+      }),
+      appendMessageContent: (id, chunk, sessionId) => set((s) => {
+        const targetSessionId = sessionId ?? s.activeChatSessionId
+        if (targetSessionId !== s.activeChatSessionId) {
+          return {}
+        }
         if (s.streamingMessageId !== id) {
           return { streamingMessageId: id, streamingContent: chunk }
         }
         return { streamingContent: s.streamingContent + chunk }
       }),
-      updateMessage: (id, updater) => set(s => ({
-        chatMessages: s.chatMessages.map(msg => (
+      updateMessage: (id, updater, sessionId) => setPersistedState((s) => {
+        const targetSessionId = sessionId ?? s.activeChatSessionId
+        const currentMessages = getSessionMessages(s.chatSessions, targetSessionId)
+        const nextMessages = currentMessages.map((msg) => (
           msg.id === id ? updater(msg) : msg
-        )),
-      })),
-      deleteChatMessage: (id) => set(s => ({
-        chatMessages: s.chatMessages.filter((msg) => msg.id !== id),
-      })),
-      setChatLoading: (loading) => set(s => {
+        ))
+        const chatSessions = syncChatSessionMessages(s.chatSessions, targetSessionId, nextMessages)
+        return {
+          chatSessions,
+          chatMessages: targetSessionId === s.activeChatSessionId ? nextMessages : s.chatMessages,
+        }
+      }),
+      deleteChatMessage: (id, sessionId) => setPersistedState((s) => {
+        const targetSessionId = sessionId ?? s.activeChatSessionId
+        const currentMessages = getSessionMessages(s.chatSessions, targetSessionId)
+        const nextMessages = currentMessages.filter((msg) => msg.id !== id)
+        const chatSessions = syncChatSessionMessages(s.chatSessions, targetSessionId, nextMessages)
+        return {
+          chatSessions,
+          chatMessages: targetSessionId === s.activeChatSessionId ? nextMessages : s.chatMessages,
+        }
+      }),
+      setChatLoading: (loading) => setPersistedState((s) => {
         if (!loading && s.streamingMessageId) {
-          // Finalize streaming: flush content into the chat message
-          const msgs = s.chatMessages.map(msg =>
+          const nextMessages = s.chatMessages.map((msg) =>
             msg.id === s.streamingMessageId
               ? { ...msg, content: s.streamingContent || msg.content, isStreaming: false }
-              : msg
+              : msg,
           )
-          return { chatLoading: false, chatMessages: msgs, streamingMessageId: null, streamingContent: '' }
+          return {
+            chatLoading: false,
+            chatMessages: nextMessages,
+            chatSessions: syncChatSessionMessages(s.chatSessions, s.activeChatSessionId, nextMessages),
+            streamingMessageId: null,
+            streamingContent: '',
+          }
         }
         return { chatLoading: loading }
       }),
-      clearChat: () => set({ chatMessages: [] }),
+      clearChat: (sessionId) => setPersistedState((s) => {
+        const targetSessionId = sessionId ?? s.activeChatSessionId
+        const chatSessions = s.chatSessions.map((session) => (
+          session.id === targetSessionId
+            ? {
+                ...session,
+                title: DEFAULT_CHAT_SESSION_TITLE,
+                messages: [],
+                updatedAt: Date.now(),
+              }
+            : session
+        ))
+        return {
+          chatSessions,
+          chatMessages: targetSessionId === s.activeChatSessionId ? [] : s.chatMessages,
+          streamingMessageId: targetSessionId === s.activeChatSessionId ? null : s.streamingMessageId,
+          streamingContent: targetSessionId === s.activeChatSessionId ? '' : s.streamingContent,
+        }
+      }),
 
       // AI Config
       setAIConfig: (config) => setPersistedState(s => ({ aiConfig: normalizeAIConfig({ ...s.aiConfig, ...config }) })),

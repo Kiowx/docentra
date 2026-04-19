@@ -2,6 +2,7 @@ import React, { useState, useCallback, useRef, useEffect } from 'react'
 import { useSpreadsheetStore } from '@/store/useSpreadsheetStore'
 import { cellKey, parseCellKey, colToLetter } from '@/utils/cellUtils'
 import { formatCellValue } from '@/utils/formulaEngine'
+import { TOTAL_COLS } from '@/types'
 
 interface AutoFilterDropdownProps {
   col: number
@@ -81,8 +82,8 @@ const AutoFilterDropdown: React.FC<AutoFilterDropdownProps> = React.memo(({
       const hidden = !enabledValues.has(val)
       if (hidden) {
         setCellFormat(
-          { startRow: r, startCol: 0, endRow: r, endCol: 200 },
-          { bgColor: '#f0f0f0', textColor: '#ccc' }
+          { startRow: r, startCol: 0, endRow: r, endCol: TOTAL_COLS - 1 },
+          { bgColor: '#f3f4f6', textColor: '#9ca3af' }
         )
       }
     }

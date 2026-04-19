@@ -49,6 +49,8 @@ WelcomeScreen.displayName = 'WelcomeScreen'
 
 const MessageList: React.FC = React.memo(() => {
   const chatMessages = useSpreadsheetStore((s) => s.chatMessages)
+  const streamingMessageId = useSpreadsheetStore((s) => s.streamingMessageId)
+  const streamingContentLength = useSpreadsheetStore((s) => s.streamingContent.length)
   const bottomRef = useRef<HTMLDivElement>(null)
   const containerRef = useRef<HTMLDivElement>(null)
   const isAutoScrollRef = useRef(true)
@@ -66,7 +68,7 @@ const MessageList: React.FC = React.memo(() => {
     if (isAutoScrollRef.current) {
       bottomRef.current?.scrollIntoView({ behavior: 'smooth' })
     }
-  }, [chatMessages])
+  }, [chatMessages, streamingMessageId, streamingContentLength])
 
   const handlePromptClick = useCallback((prompt: string) => {
     sendMessage(prompt)

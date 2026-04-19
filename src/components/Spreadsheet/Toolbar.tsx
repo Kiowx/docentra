@@ -1,12 +1,12 @@
 import React, { useCallback, useRef, useState } from 'react'
 import { useSpreadsheetStore } from '@/store/useSpreadsheetStore'
 import type { CellFormat, NumberFormat } from '@/types'
-import { cellKey } from '@/utils/cellUtils'
+import { cellKey, getActiveRange as getActiveRangeUtil } from '@/utils/cellUtils'
 import { TOTAL_COLS, TOTAL_ROWS } from '@/types'
 import { computeAutoFitColumnWidth, computeAutoFitRowHeight } from '@/utils/autoFit'
 import SortDialog from './SortDialog'
 
-const Divider = () => <div className="w-px h-5 bg-gray-200 mx-1.5" />
+const Divider = () => <div role="separator" aria-orientation="vertical" className="w-px h-5 bg-gray-200 mx-1.5" />
 
 const Toolbar: React.FC = React.memo(() => {
   const sheets = useSpreadsheetStore((s) => s.sheets)
@@ -35,22 +35,7 @@ const Toolbar: React.FC = React.memo(() => {
   const activeCell = selection.activeCell
   const format = activeCellData?.format
 
-  const getFormatRange = useCallback(() => {
-    if (selection.rangeStart && selection.rangeEnd) {
-      return {
-        startRow: Math.min(selection.rangeStart.row, selection.rangeEnd.row),
-        startCol: Math.min(selection.rangeStart.col, selection.rangeEnd.col),
-        endRow: Math.max(selection.rangeStart.row, selection.rangeEnd.row),
-        endCol: Math.max(selection.rangeStart.col, selection.rangeEnd.col),
-      }
-    }
-    return {
-      startRow: activeCell.row,
-      startCol: activeCell.col,
-      endRow: activeCell.row,
-      endCol: activeCell.col,
-    }
-  }, [selection, activeCell])
+  const getFormatRange = useCallback(() => getActiveRangeUtil(selection), [selection])
 
   const applyFormat = useCallback((fmt: Partial<CellFormat>) => {
     const range = getFormatRange()
@@ -299,6 +284,15 @@ const Toolbar: React.FC = React.memo(() => {
       >
         <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
           <path d="M3 6h12M3 12h8M3 18h4" /><path d="M18 20V4" /><polyline points="15 17 18 20 21 17" />
+        </svg>
+      </button>
+      <button
+        onClick={() => setShowSortDialog(true)}
+        className="w-7 h-7 flex items-center justify-center rounded-md text-gray-500 hover:bg-gray-100 hover:text-gray-700 transition-colors"
+        title="多级排序"
+      >
+        <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+          <path d="M3 6h12M3 12h8M3 18h4" /><path d="M17 4v16" /><polyline points="14 7 17 4 20 7" /><polyline points="14 17 17 20 20 17" />
         </svg>
       </button>
 

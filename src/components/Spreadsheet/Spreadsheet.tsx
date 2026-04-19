@@ -118,7 +118,17 @@ const RenderedCellsLayer = React.memo<RenderedCellsLayerProps>(({
       />
     ))}
   </>
-))
+), (prev, next) => {
+  if (prev.cells.length !== next.cells.length) return false
+  for (let i = 0; i < prev.cells.length; i++) {
+    const p = prev.cells[i]
+    const n = next.cells[i]
+    if (p.row !== n.row || p.col !== n.col || p.x !== n.x || p.y !== n.y ||
+        p.width !== n.width || p.height !== n.height || p.value !== n.value ||
+        p.rawValue !== n.rawValue || p.format !== n.format) return false
+  }
+  return true
+})
 RenderedCellsLayer.displayName = 'RenderedCellsLayer'
 
 interface GridLinesLayerProps {
@@ -221,7 +231,6 @@ const Spreadsheet: React.FC = React.memo(() => {
   const selection = useSpreadsheetStore((s) => s.selection)
   const editMode = useSpreadsheetStore((s) => s.editMode)
   const editValue = useSpreadsheetStore((s) => s.editValue)
-
   const setActiveCell = useSpreadsheetStore((s) => s.setActiveCell)
   const setSelectionRange = useSpreadsheetStore((s) => s.setSelectionRange)
   const setEditMode = useSpreadsheetStore((s) => s.setEditMode)
@@ -253,14 +262,16 @@ const Spreadsheet: React.FC = React.memo(() => {
   const isAutoFilling = useRef(false)
   const autoFillAnchor = useRef<CellAddress | null>(null)
   const [autoFillRange, setAutoFillRange] = useState<{ startRow: number; startCol: number; endRow: number; endCol: number } | null>(null)
+  const autoFillRangeRef = useRef(autoFillRange)
+  autoFillRangeRef.current = autoFillRange
   const [doubleClickCursorOffset, setDoubleClickCursorOffset] = useState<number | null>(null)
   const [findReplaceVisible, setFindReplaceVisible] = useState(false)
   const [findReplaceMode, setFindReplaceMode] = useState<'find' | 'replace'>('find')
   const [filterDropdown, setFilterDropdown] = useState<{ col: number; rect: DOMRect } | null>(null)
 
   // Viewport state
-  const [viewportWidth, setViewportWidth] = useState(800)
-  const [viewportHeight, setViewportHeight] = useState(600)
+  const [viewportWidth, setViewportWidth] = useState(() => typeof window !== 'undefined' ? window.innerWidth : 800)
+  const [viewportHeight, setViewportHeight] = useState(() => typeof window !== 'undefined' ? window.innerHeight - 120 : 600)
   const [scrollPosition, setScrollPosition] = useState({ scrollLeft: 0, scrollTop: 0 })
 
   const colWidths = activeSheet?.colWidths || {}
@@ -918,7 +929,7 @@ const Spreadsheet: React.FC = React.memo(() => {
 
     const handleMouseMove = (moveEvent: MouseEvent) => {
       const delta = moveEvent.clientX - startX
-      setColWidth(colIndex, startWidth + delta)
+      setColWidth(colIndex, Math.max(30, startWidth + delta))
     }
 
     const handleMouseUp = () => {
@@ -949,7 +960,7 @@ const Spreadsheet: React.FC = React.memo(() => {
 
     const handleMouseMove = (moveEvent: MouseEvent) => {
       const delta = moveEvent.clientY - startY
-      setRowHeight(rowIndex, startHeight + delta)
+      setRowHeight(rowIndex, Math.max(18, startHeight + delta))
     }
 
     const handleMouseUp = () => {
@@ -1010,7 +1021,7 @@ const Spreadsheet: React.FC = React.memo(() => {
       document.body.style.userSelect = ''
 
       // Execute auto-fill
-      const fillRng = autoFillRange
+      const fillRng = autoFillRangeRef.current
       if (fillRng && selRange) {
         executeAutoFill(selRange, fillRng)
       }
@@ -1021,7 +1032,7 @@ const Spreadsheet: React.FC = React.memo(() => {
     document.body.style.userSelect = 'none'
     document.addEventListener('mousemove', handleMouseMove)
     document.addEventListener('mouseup', handleMouseUp)
-  }, [selRange, resolveCellFromPointer, autoFillRange])
+  }, [selRange, resolveCellFromPointer, autoFillRangeRef])
 
   const setRange = useSpreadsheetStore((s) => s.setRange)
 
@@ -1129,7 +1140,7 @@ const Spreadsheet: React.FC = React.memo(() => {
 
     for (let r = visRowStart; r <= visRowEnd; r++) {
       for (let c = visColStart; c <= visColEnd; c++) {
-        const cellData = sheetCells[`${r},${c}`]
+        const cellData = sheetCells[cellKey(r, c)]
         if (!cellData) continue
 
         const displayValue = formatCellValue(cellData)
@@ -1386,12 +1397,12 @@ const Spreadsheet: React.FC = React.memo(() => {
                 }}
               >
                 <div
-                  className="absolute bg-blue-500"
+                  className="absolute bg-blue-500 rounded-full"
                   style={{
-                    width: 6,
-                    height: 6,
-                    right: -4,
-                    bottom: -4,
+                    width: 8,
+                    height: 8,
+                    right: -5,
+                    bottom: -5,
                   }}
                 />
               </div>

@@ -138,11 +138,14 @@ const MessageBubble: React.FC<MessageBubbleProps> = React.memo(({ message }) => 
   const updateMessage = useSpreadsheetStore((s) => s.updateMessage)
   const deleteChatMessage = useSpreadsheetStore((s) => s.deleteChatMessage)
   const chatLoading = useSpreadsheetStore((s) => s.chatLoading)
-  const streamingMessageId = useSpreadsheetStore((s) => s.streamingMessageId)
-  const streamingContent = useSpreadsheetStore((s) => s.streamingContent)
+  const isCurrentlyStreaming = useSpreadsheetStore(
+    useCallback((s) => s.streamingMessageId === message.id, [message.id]),
+  )
+  const liveStreamingContent = useSpreadsheetStore(
+    useCallback((s) => (s.streamingMessageId === message.id ? s.streamingContent : ''), [message.id]),
+  )
   const isUser = message.role === 'user'
-  const isCurrentlyStreaming = streamingMessageId === message.id
-  const displayContent = isCurrentlyStreaming ? streamingContent : message.content
+  const displayContent = isCurrentlyStreaming ? liveStreamingContent : message.content
   const isEditable = isUser && !message.isStreaming && !isCurrentlyStreaming
   const isDeletable = !message.isStreaming && !isCurrentlyStreaming
   const actionLocked = chatLoading || message.isStreaming || isCurrentlyStreaming
@@ -153,6 +156,62 @@ const MessageBubble: React.FC<MessageBubbleProps> = React.memo(({ message }) => 
   const [copied, setCopied] = useState(false)
   const [isEditing, setIsEditing] = useState(false)
   const [draft, setDraft] = useState(message.content)
+
+  const renderedMessageContent = useMemo(() => {
+    if (isUser) {
+      return <div className="whitespace-pre-wrap">{displayContent}</div>
+    }
+
+    return (
+      <Markdown
+        remarkPlugins={[remarkGfm]}
+        rehypePlugins={[rehypeSanitize]}
+        components={{
+          code: ({ className, children, ...props }) => {
+            const isBlock = className?.includes('language-') || (String(children).includes('\n') && !className)
+            if (!isBlock) {
+              return <code className="bg-gray-200 text-gray-700 rounded px-1 py-0.5 text-xs" {...props}>{children}</code>
+            }
+            return (
+              <div className="relative group/pre my-2">
+                <pre className="bg-gray-800 text-gray-100 rounded-lg p-3 text-xs overflow-x-auto">
+                  <code className={className} {...props}>{children}</code>
+                </pre>
+                <button
+                  onClick={() => navigator.clipboard.writeText(String(children).replace(/\n$/, ''))}
+                  className="absolute top-1.5 right-1.5 px-2 py-1 text-[10px] bg-gray-700 text-gray-300 rounded hover:bg-gray-600 opacity-0 group-hover/pre:opacity-100 transition-opacity"
+                >
+                  复制
+                </button>
+              </div>
+            )
+          },
+          table: ({ children }) => (
+            <div className="overflow-x-auto my-2">
+              <table className="min-w-full border border-gray-300 text-xs">{children}</table>
+            </div>
+          ),
+          th: ({ children }) => (
+            <th className="border border-gray-300 bg-gray-200 px-2 py-1 text-left font-semibold">{children}</th>
+          ),
+          td: ({ children }) => (
+            <td className="border border-gray-300 px-2 py-1">{children}</td>
+          ),
+          a: ({ href, children }) => (
+            <a href={href} target="_blank" rel="noopener noreferrer" className="text-blue-600 underline">{children}</a>
+          ),
+          ul: ({ children }) => <ul className="list-disc pl-4 my-1 space-y-0.5">{children}</ul>,
+          ol: ({ children }) => <ol className="list-decimal pl-4 my-1 space-y-0.5">{children}</ol>,
+          blockquote: ({ children }) => (
+            <blockquote className="border-l-[3px] border-gray-400 pl-3 my-2 text-gray-600 italic">{children}</blockquote>
+          ),
+          p: ({ children }) => <p className="my-1">{children}</p>,
+        }}
+      >
+        {displayContent}
+      </Markdown>
+    )
+  }, [displayContent, isUser])
 
   useEffect(() => {
     setDraft(message.content)
@@ -256,50 +315,9 @@ const MessageBubble: React.FC<MessageBubbleProps> = React.memo(({ message }) => 
           </div>
         ) : (
           <div className="text-sm leading-relaxed break-words">
-            {isUser ? (
-              <div className="whitespace-pre-wrap">{displayContent}</div>
-            ) : (
-              <Markdown
-                remarkPlugins={[remarkGfm]}
-                rehypePlugins={[rehypeSanitize]}
-                components={{
-                  code: ({ className, children, ...props }) => {
-                    const isBlock = className?.includes('language-')
-                    return isBlock ? (
-                      <pre className="bg-gray-800 text-gray-100 rounded-lg p-3 my-2 text-xs overflow-x-auto">
-                        <code className={className} {...props}>{children}</code>
-                      </pre>
-                    ) : (
-                      <code className="bg-gray-200 text-gray-700 rounded px-1 py-0.5 text-xs" {...props}>{children}</code>
-                    )
-                  },
-                  table: ({ children }) => (
-                    <div className="overflow-x-auto my-2">
-                      <table className="min-w-full border border-gray-300 text-xs">{children}</table>
-                    </div>
-                  ),
-                  th: ({ children }) => (
-                    <th className="border border-gray-300 bg-gray-200 px-2 py-1 text-left font-semibold">{children}</th>
-                  ),
-                  td: ({ children }) => (
-                    <td className="border border-gray-300 px-2 py-1">{children}</td>
-                  ),
-                  a: ({ href, children }) => (
-                    <a href={href} target="_blank" rel="noopener noreferrer" className="text-blue-600 underline">{children}</a>
-                  ),
-                  ul: ({ children }) => <ul className="list-disc pl-4 my-1 space-y-0.5">{children}</ul>,
-                  ol: ({ children }) => <ol className="list-decimal pl-4 my-1 space-y-0.5">{children}</ol>,
-                  blockquote: ({ children }) => (
-                    <blockquote className="border-l-3 border-gray-400 pl-3 my-2 text-gray-600 italic">{children}</blockquote>
-                  ),
-                  p: ({ children }) => <p className="my-1">{children}</p>,
-                }}
-              >
-                {displayContent}
-              </Markdown>
-            )}
+            {renderedMessageContent}
             {(message.isStreaming || isCurrentlyStreaming) && (
-              <span className="inline-block w-0.5 h-4 ml-0.5 bg-current animate-pulse align-text-bottom" />
+              <span className="inline-block w-0.5 h-4 ml-0.5 bg-current align-text-bottom animate-[blink_1s_step-end_infinite]" />
             )}
           </div>
         )}

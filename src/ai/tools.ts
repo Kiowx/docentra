@@ -20,8 +20,13 @@ export const spreadsheetTools: ToolDefinition[] = [
           description: 'Column index (0-based)',
         },
         value: {
-          type: 'string',
-          description: 'The value to set in the cell',
+          anyOf: [
+            { type: 'string' },
+            { type: 'number' },
+            { type: 'boolean' },
+            { type: 'null' },
+          ],
+          description: 'The value to set in the cell. Numbers, booleans, strings, and null are accepted.',
         },
       },
       required: ['row', 'col', 'value'],
@@ -45,12 +50,45 @@ export const spreadsheetTools: ToolDefinition[] = [
           type: 'array',
           items: {
             type: 'array',
-            items: { type: 'string' },
+            items: {
+              anyOf: [
+                { type: 'string' },
+                { type: 'number' },
+                { type: 'boolean' },
+                { type: 'null' },
+              ],
+            },
           },
-          description: '2D array of cell values (each sub-array is a row)',
+          description: '2D array of cell values (each sub-array is a row). Numbers, booleans, strings, and null are accepted.',
         },
       },
       required: ['startRow', 'startCol', 'data'],
+    },
+  },
+  {
+    name: 'clear_cells',
+    description: 'Clear the contents of a rectangular range of cells. Formatting in those cells will also be removed if the cells become empty.',
+    parameters: {
+      type: 'object',
+      properties: {
+        startRow: {
+          type: 'integer',
+          description: 'Starting row index (0-based)',
+        },
+        startCol: {
+          type: 'integer',
+          description: 'Starting column index (0-based)',
+        },
+        endRow: {
+          type: 'integer',
+          description: 'Ending row index (0-based, inclusive)',
+        },
+        endCol: {
+          type: 'integer',
+          description: 'Ending column index (0-based, inclusive)',
+        },
+      },
+      required: ['startRow', 'startCol', 'endRow', 'endCol'],
     },
   },
   {
@@ -131,7 +169,7 @@ export const spreadsheetTools: ToolDefinition[] = [
   },
   {
     name: 'format_cells',
-    description: 'Apply formatting to a rectangular range of cells. Supports bold, italic, underline, alignment, and colors.',
+    description: 'Apply formatting to a rectangular range of cells. Supports text styles, alignment, wrapping, colors, font size, and number formats.',
     parameters: {
       type: 'object',
       properties: {
@@ -157,6 +195,7 @@ export const spreadsheetTools: ToolDefinition[] = [
             bold: { type: 'boolean', description: 'Bold text' },
             italic: { type: 'boolean', description: 'Italic text' },
             underline: { type: 'boolean', description: 'Underlined text' },
+            wrapText: { type: 'boolean', description: 'Wrap long text onto multiple lines' },
             align: {
               type: 'string',
               enum: ['left', 'center', 'right'],
@@ -164,6 +203,12 @@ export const spreadsheetTools: ToolDefinition[] = [
             },
             bgColor: { type: 'string', description: 'Background color (CSS color, e.g. "#FF0000" or "red")' },
             textColor: { type: 'string', description: 'Text color (CSS color)' },
+            fontSize: { type: 'number', description: 'Font size in CSS pixels' },
+            numberFormat: {
+              type: 'string',
+              enum: ['general', 'number', 'currency', 'percent', 'scientific', 'date', 'text'],
+              description: 'Spreadsheet number format preset',
+            },
           },
           description: 'Formatting options to apply',
         },
@@ -262,17 +307,219 @@ export const spreadsheetTools: ToolDefinition[] = [
     },
   },
   {
-    name: 'rename_sheet',
-    description: 'Rename the currently active sheet.',
+    name: 'activate_sheet',
+    description: 'Switch the active sheet by name.',
     parameters: {
       type: 'object',
       properties: {
         name: {
           type: 'string',
-          description: 'New name for the active sheet',
+          description: 'Name of the sheet to activate',
         },
       },
       required: ['name'],
+    },
+  },
+  {
+    name: 'rename_sheet',
+    description: 'Rename a sheet. If sheetName is omitted, the currently active sheet will be renamed.',
+    parameters: {
+      type: 'object',
+      properties: {
+        name: {
+          type: 'string',
+          description: 'New name for the sheet',
+        },
+        sheetName: {
+          type: 'string',
+          description: 'Existing sheet name to rename. Defaults to the active sheet.',
+        },
+      },
+      required: ['name'],
+    },
+  },
+  {
+    name: 'duplicate_sheet',
+    description: 'Duplicate an existing sheet by name. You can optionally provide a new name for the duplicated sheet.',
+    parameters: {
+      type: 'object',
+      properties: {
+        sheetName: {
+          type: 'string',
+          description: 'Name of the sheet to duplicate',
+        },
+        newName: {
+          type: 'string',
+          description: 'Optional name for the duplicated sheet',
+        },
+      },
+      required: ['sheetName'],
+    },
+  },
+  {
+    name: 'delete_sheet',
+    description: 'Delete a sheet by name. The last remaining sheet cannot be deleted.',
+    parameters: {
+      type: 'object',
+      properties: {
+        sheetName: {
+          type: 'string',
+          description: 'Name of the sheet to delete',
+        },
+      },
+      required: ['sheetName'],
+    },
+  },
+  {
+    name: 'set_column_width',
+    description: 'Set the width of a column on the active sheet. Width is in CSS pixels.',
+    parameters: {
+      type: 'object',
+      properties: {
+        col: {
+          type: 'integer',
+          description: 'Column index (0-based)',
+        },
+        width: {
+          type: 'number',
+          description: 'Column width in CSS pixels',
+        },
+      },
+      required: ['col', 'width'],
+    },
+  },
+  {
+    name: 'set_row_height',
+    description: 'Set the height of a row on the active sheet. Height is in CSS pixels.',
+    parameters: {
+      type: 'object',
+      properties: {
+        row: {
+          type: 'integer',
+          description: 'Row index (0-based)',
+        },
+        height: {
+          type: 'number',
+          description: 'Row height in CSS pixels',
+        },
+      },
+      required: ['row', 'height'],
+    },
+  },
+  {
+    name: 'copy_range',
+    description: 'Copy a rectangular range of cells on the active sheet to the internal clipboard.',
+    parameters: {
+      type: 'object',
+      properties: {
+        startRow: {
+          type: 'integer',
+          description: 'Starting row index (0-based)',
+        },
+        startCol: {
+          type: 'integer',
+          description: 'Starting column index (0-based)',
+        },
+        endRow: {
+          type: 'integer',
+          description: 'Ending row index (0-based, inclusive)',
+        },
+        endCol: {
+          type: 'integer',
+          description: 'Ending column index (0-based, inclusive)',
+        },
+      },
+      required: ['startRow', 'startCol', 'endRow', 'endCol'],
+    },
+  },
+  {
+    name: 'cut_range',
+    description: 'Cut a rectangular range of cells on the active sheet to the internal clipboard.',
+    parameters: {
+      type: 'object',
+      properties: {
+        startRow: {
+          type: 'integer',
+          description: 'Starting row index (0-based)',
+        },
+        startCol: {
+          type: 'integer',
+          description: 'Starting column index (0-based)',
+        },
+        endRow: {
+          type: 'integer',
+          description: 'Ending row index (0-based, inclusive)',
+        },
+        endCol: {
+          type: 'integer',
+          description: 'Ending column index (0-based, inclusive)',
+        },
+      },
+      required: ['startRow', 'startCol', 'endRow', 'endCol'],
+    },
+  },
+  {
+    name: 'paste_range',
+    description: 'Paste the current internal clipboard contents starting at the target cell on the active sheet.',
+    parameters: {
+      type: 'object',
+      properties: {
+        targetRow: {
+          type: 'integer',
+          description: 'Target starting row index (0-based)',
+        },
+        targetCol: {
+          type: 'integer',
+          description: 'Target starting column index (0-based)',
+        },
+      },
+      required: ['targetRow', 'targetCol'],
+    },
+  },
+  {
+    name: 'undo_last_action',
+    description: 'Undo the most recent spreadsheet change.',
+    parameters: {
+      type: 'object',
+      properties: {},
+    },
+  },
+  {
+    name: 'redo_last_action',
+    description: 'Redo the most recently undone spreadsheet change.',
+    parameters: {
+      type: 'object',
+      properties: {},
+    },
+  },
+  {
+    name: 'export_workbook',
+    description: 'Export the entire workbook as an XLSX file and trigger a download in the app.',
+    parameters: {
+      type: 'object',
+      properties: {
+        fileName: {
+          type: 'string',
+          description: 'Optional file name for the exported workbook, for example "销售报表.xlsx"',
+        },
+      },
+    },
+  },
+  {
+    name: 'export_sheet_csv',
+    description: 'Export a sheet as a CSV file and trigger a download in the app. If sheetName is omitted, the active sheet is exported.',
+    parameters: {
+      type: 'object',
+      properties: {
+        sheetName: {
+          type: 'string',
+          description: 'Optional sheet name to export. Defaults to the active sheet.',
+        },
+        fileName: {
+          type: 'string',
+          description: 'Optional file name for the exported CSV, for example "销售明细.csv"',
+        },
+      },
     },
   },
 ]

@@ -1,6 +1,7 @@
-import React, { useEffect, useRef, useCallback } from 'react'
+import React, { useState, useEffect, useRef, useCallback } from 'react'
 import { useSpreadsheetStore } from '@/store/useSpreadsheetStore'
 import { computeAutoFitColumnWidth, computeAutoFitRowHeight } from '@/utils/autoFit'
+import { getActiveRange as getActiveRangeUtil } from '@/utils/cellUtils'
 
 interface MenuItem {
   label: string
@@ -10,6 +11,7 @@ interface MenuItem {
 
 const ContextMenu: React.FC = React.memo(() => {
   const menuRef = useRef<HTMLDivElement>(null)
+  const [focusedIndex, setFocusedIndex] = useState(-1)
   const contextMenu = useSpreadsheetStore((s) => s.contextMenu)
   const activeSheet = useSpreadsheetStore((s) => s.sheets.find((sh) => sh.id === s.activeSheetId) || s.sheets[0])
   const hideContextMenu = useSpreadsheetStore((s) => s.hideContextMenu)
@@ -28,23 +30,7 @@ const ContextMenu: React.FC = React.memo(() => {
   const undo = useSpreadsheetStore((s) => s.undo)
   const redo = useSpreadsheetStore((s) => s.redo)
 
-  const getActiveRange = useCallback(() => {
-    const sel = selection
-    if (sel.rangeStart && sel.rangeEnd) {
-      return {
-        startRow: Math.min(sel.rangeStart.row, sel.rangeEnd.row),
-        startCol: Math.min(sel.rangeStart.col, sel.rangeEnd.col),
-        endRow: Math.max(sel.rangeStart.row, sel.rangeEnd.row),
-        endCol: Math.max(sel.rangeStart.col, sel.rangeEnd.col),
-      }
-    }
-    return {
-      startRow: sel.activeCell.row,
-      startCol: sel.activeCell.col,
-      endRow: sel.activeCell.row,
-      endCol: sel.activeCell.col,
-    }
-  }, [selection])
+  const getActiveRange = useCallback(() => getActiveRangeUtil(selection), [selection])
 
   const handleCut = useCallback(() => {
     const range = getActiveRange()
@@ -216,19 +202,37 @@ const ContextMenu: React.FC = React.memo(() => {
   return (
     <div
       ref={menuRef}
-      className="fixed z-[100] bg-white border border-gray-300 rounded-md shadow-lg py-1 min-w-[180px]"
+      className="fixed z-[100] bg-white border border-gray-300 rounded-md shadow-lg py-1 min-w-[180px] focus:outline-none"
+      role="menu"
+      aria-label="上下文菜单"
       style={{
         left: clampedX,
         top: clampedY,
       }}
       onContextMenu={(e) => e.preventDefault()}
+      onKeyDown={(e) => {
+        if (e.key === 'ArrowDown') {
+          e.preventDefault()
+          setFocusedIndex(prev => prev < menuItems.length - 1 ? prev + 1 : 0)
+        } else if (e.key === 'ArrowUp') {
+          e.preventDefault()
+          setFocusedIndex(prev => prev > 0 ? prev - 1 : menuItems.length - 1)
+        } else if (e.key === 'Enter' && focusedIndex >= 0) {
+          e.preventDefault()
+          menuItems[focusedIndex]?.action()
+        }
+      }}
     >
       {menuItems.map((item, idx) => (
         <React.Fragment key={idx}>
-          {item.separator && <div className="h-px bg-gray-200 my-1" />}
+          {item.separator && <div role="separator" className="h-px bg-gray-200 my-1" />}
           <button
-            className="w-full text-left px-4 py-1.5 text-sm text-gray-700 hover:bg-blue-50 hover:text-blue-700
-              transition-colors duration-75 cursor-pointer flex items-center gap-2"
+            role="menuitem"
+            className={`w-full text-left px-4 py-1.5 text-sm transition-colors duration-75 cursor-pointer flex items-center gap-2 ${
+              focusedIndex === idx
+                ? 'bg-blue-50 text-blue-700'
+                : 'text-gray-700 hover:bg-blue-50 hover:text-blue-700'
+            }`}
             onClick={item.action}
           >
             {item.label}

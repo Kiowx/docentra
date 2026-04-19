@@ -12,6 +12,11 @@ export default defineConfig(({ command, mode }) => {
       withElectron && electron({
         main: {
           entry: 'electron/main.ts',
+          onstart({ startup }) {
+            const env = { ...process.env }
+            delete env.ELECTRON_RUN_AS_NODE
+            startup(['.', '--no-sandbox'], { env })
+          },
         },
         preload: {
           input: 'electron/preload.ts',
